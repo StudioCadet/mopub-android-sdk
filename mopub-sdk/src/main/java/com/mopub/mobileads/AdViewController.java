@@ -38,6 +38,7 @@ import android.location.Location;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -120,7 +121,7 @@ public class AdViewController {
             }
         };
 
-        mHandler = new Handler();
+        mHandler = new Handler(Looper.getMainLooper());
     }
 
     public MoPubView getMoPubView() {
@@ -474,12 +475,17 @@ public class AdViewController {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                MoPubView moPubView = getMoPubView();
-                if (moPubView == null) {
-                    return;
-                }
-                moPubView.removeAllViews();
-                moPubView.addView(view, getAdLayoutParams(view));
+            	MoPubView moPubView = getMoPubView();
+            	if (moPubView == null) {
+            		return;
+            	}
+            	try {
+            		moPubView.removeAllViews();
+	                moPubView.addView(view, getAdLayoutParams(view));
+            	}
+            	catch(Exception e) {
+            		moPubView.adFailed(MoPubErrorCode.INTERNAL_ERROR);
+            	}
             }
         });
     }

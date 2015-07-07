@@ -1,30 +1,31 @@
 package com.mopub.nativeads;
 
 import android.content.Context;
-import android.location.Location;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.text.TextUtils;
+
 import com.mopub.common.AdUrlGenerator;
 import com.mopub.common.ClientMetadata;
-import com.mopub.common.LocationService;
-import com.mopub.common.MoPub;
-import com.mopub.common.util.DateAndTime;
-import com.mopub.common.util.Strings;
+import com.mopub.common.Constants;
 
 class NativeUrlGenerator extends AdUrlGenerator {
-    private String mDesiredAssets;
-    private String mSequenceNumber;
+    @Nullable private String mDesiredAssets;
+    @Nullable private String mSequenceNumber;
 
     NativeUrlGenerator(Context context) {
         super(context);
     }
 
+    @NonNull
     @Override
     public NativeUrlGenerator withAdUnitId(final String adUnitId) {
         mAdUnitId = adUnitId;
         return this;
     }
 
-    NativeUrlGenerator withRequest(final RequestParameters requestParameters) {
+    @NonNull
+    NativeUrlGenerator withRequest(@Nullable final RequestParameters requestParameters) {
         if (requestParameters != null) {
             mKeywords = requestParameters.getKeywords();
             mLocation = requestParameters.getLocation();
@@ -33,6 +34,7 @@ class NativeUrlGenerator extends AdUrlGenerator {
         return this;
     }
 
+    @NonNull
     NativeUrlGenerator withSequenceNumber(final int sequenceNumber) {
         mSequenceNumber = String.valueOf(sequenceNumber);
         return this;
@@ -40,49 +42,10 @@ class NativeUrlGenerator extends AdUrlGenerator {
 
     @Override
     public String generateUrlString(final String serverHostname) {
-        initUrlString(serverHostname, Constants.NATIVE_HANDLER);
-
-        setAdUnitId(mAdUnitId);
-
-        setKeywords(mKeywords);
-
-        Location location = mLocation;
-        if (location == null) {
-            location = LocationService.getLastKnownLocation(mContext,
-                    MoPub.getLocationPrecision(),
-                    MoPub.getLocationAwareness());
-        }
-        setLocation(location);
+        initUrlString(serverHostname, Constants.AD_HANDLER);
 
         ClientMetadata clientMetadata = ClientMetadata.getInstance(mContext);
-        setSdkVersion(clientMetadata.getSdkVersion());
-
-        setDeviceInfo(clientMetadata.getDeviceManufacturer(),
-                clientMetadata.getDeviceModel(),
-                clientMetadata.getDeviceProduct());
-
-        setUdid(clientMetadata.getAdvertisingId());
-
-        setDoNotTrack(clientMetadata.isDoNotTrackSet());
-
-        setTimezone(DateAndTime.getTimeZoneOffsetString());
-
-        setOrientation(clientMetadata.getOrientationString());
-
-        setDensity(clientMetadata.getDensity());
-
-        String networkOperator = clientMetadata.getNetworkOperator();
-        setMccCode(networkOperator);
-        setMncCode(networkOperator);
-
-        setIsoCountryCode(clientMetadata.getIsoCountryCode());
-        setCarrierName(clientMetadata.getNetworkOperatorName());
-
-        setNetworkType(clientMetadata.getActiveNetworkType());
-
-        setAppVersion(clientMetadata.getAppVersion());
-
-        setTwitterAppInstalledFlag();
+        addBaseParams(clientMetadata);
 
         setDesiredAssets();
 
@@ -98,7 +61,7 @@ class NativeUrlGenerator extends AdUrlGenerator {
     }
 
     private void setDesiredAssets() {
-        if (mDesiredAssets != null && !Strings.isEmpty(mDesiredAssets)) {
+        if (!TextUtils.isEmpty(mDesiredAssets)) {
             addParam("assets", mDesiredAssets);
         }
     }

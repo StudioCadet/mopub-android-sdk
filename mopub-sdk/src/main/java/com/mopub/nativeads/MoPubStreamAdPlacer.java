@@ -2,17 +2,26 @@ package com.mopub.nativeads;
 
 import android.content.Context;
 import android.os.Handler;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.ViewGroup;
+
+import com.mopub.common.Preconditions;
+import com.mopub.common.Preconditions.NoThrow;
 import com.mopub.common.VisibleForTesting;
+import com.mopub.common.logging.MoPubLog;
 import com.mopub.nativeads.MoPubNativeAdPositioning.MoPubClientPositioning;
 import com.mopub.nativeads.MoPubNativeAdPositioning.MoPubServerPositioning;
 import com.mopub.nativeads.PositioningSource.PositioningListener;
 
-import java.util.*;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.WeakHashMap;
 
 /**
- * @code MoPubStreamAdPlacer facilitates loading ads and placing them into a content stream.
+ * {@code MoPubStreamAdPlacer} facilitates loading ads and placing them into a content stream.
  *
  * If you are inserting ads into a ListView, we recommend that you use a {@link MoPubAdAdapter}
  * instead of this class.
@@ -29,25 +38,39 @@ public class MoPubStreamAdPlacer {
      * instead of an ad.
      */
     public static final int CONTENT_VIEW_TYPE = 0;
+    private final static MoPubNativeAdLoadedListener EMPTY_NATIVE_AD_LOADED_LISTENER =
+            new MoPubNativeAdLoadedListener() {
+                @Override
+                public void onAdLoaded(final int position) {
+                }
 
-    private final Context mContext;
-    private final Handler mPlacementHandler;
-    private final Runnable mPlacementRunnable;
-    private final PositioningSource mPositioningSource;
-    private final NativeAdSource mAdSource;
-    private final ImpressionTracker mImpressionTracker;
-    private final WeakHashMap<View, NativeResponse> mNativeResponseMap;
+                @Override
+                public void onAdRemoved(final int position) {
+                }
+            };
+
+    @NonNull private final Context mContext;
+    @NonNull private final Handler mPlacementHandler;
+    @NonNull private final Runnable mPlacementRunnable;
+    @NonNull private final PositioningSource mPositioningSource;
+    @NonNull private final NativeAdSource mAdSource;
+    @NonNull private final ImpressionTracker mImpressionTracker;
+
+    @NonNull private final HashMap<NativeResponse, WeakReference<View>> mViewMap;
+    @NonNull private final WeakHashMap<View, NativeResponse> mNativeResponseMap;
 
     private boolean mHasReceivedPositions;
-    private PlacementData mPendingPlacementData;
+    @NonNull private PlacementData mPendingPlacementData;
     private boolean mHasReceivedAds;
     private boolean mHasPlacedAds;
-    private PlacementData mPlacementData;
+    @NonNull private PlacementData mPlacementData;
     
-    private MoPubAdRenderer mAdRenderer;
-    private String mAdUnitId;
+    @Nullable private MoPubAdRenderer mAdRenderer;
+    @Nullable private String mAdUnitId;
 
-    private MoPubNativeAdLoadedListener mAdLoadedListener;
+    @NonNull private MoPubNativeAdLoadedListener mAdLoadedListener =
+            EMPTY_NATIVE_AD_LOADED_LISTENER;
+
     // The visible range is the range of items which we believe are visible, inclusive.
     // Placing ads near this range makes for a smoother user experience when scrolling up
     // or down.
@@ -69,7 +92,7 @@ public class MoPubStreamAdPlacer {
      *
      * @param context The activity context.
      */
-    public MoPubStreamAdPlacer(final Context context) {
+    public MoPubStreamAdPlacer(@NonNull final Context context) {
         // MoPubClientPositioning is mutable, so we must take care not to hold a
         // reference to it that might be subsequently modified by the caller.
         this(context, MoPubNativeAdPositioning.serverPositioning());
@@ -82,7 +105,8 @@ public class MoPubStreamAdPlacer {
      * @param adPositioning A positioning object for specifying where ads will be placed in your
      * stream. See {@link MoPubNativeAdPositioning#serverPositioning()}.
      */
-    public MoPubStreamAdPlacer(final Context context, final MoPubServerPositioning adPositioning) {
+    public MoPubStreamAdPlacer(@NonNull final Context context,
+            @NonNull final MoPubServerPositioning adPositioning) {
         this(context,
                 new NativeAdSource(),
                 new ImpressionTracker(context),
@@ -96,7 +120,8 @@ public class MoPubStreamAdPlacer {
      * @param adPositioning A positioning object for specifying where ads will be placed in your
      * stream. See {@link MoPubNativeAdPositioning#clientPositioning()}.
      */
-    public MoPubStreamAdPlacer(final Context context, final MoPubClientPositioning adPositioning) {
+    public MoPubStreamAdPlacer(@NonNull final Context context,
+            @NonNull final MoPubClientPositioning adPositioning) {
         // MoPubClientPositioning is mutable, so we must take care not to hold a
         // reference to it that might be subsequently modified by the caller.
         this(context,
@@ -106,16 +131,25 @@ public class MoPubStreamAdPlacer {
     }
 
     @VisibleForTesting
-    MoPubStreamAdPlacer(final Context context,
-            final NativeAdSource adSource,
-            final ImpressionTracker impressionTracker,
-            final PositioningSource positioningSource) {
+    MoPubStreamAdPlacer(@NonNull final Context context,
+            @NonNull final NativeAdSource adSource,
+            @NonNull final ImpressionTracker impressionTracker,
+            @NonNull final PositioningSource positioningSource) {
+        Preconditions.checkNotNull(context, "context is not allowed to be null");
+        Preconditions.checkNotNull(adSource, "adSource is not allowed to be null");
+        Preconditions.checkNotNull(impressionTracker, "impressionTracker is not allowed to be " +
+                "null");
+        Preconditions.checkNotNull(positioningSource, "positioningSource is not allowed to be " +
+                "null");
+
         mContext = context;
         mImpressionTracker = impressionTracker;
         mPositioningSource = positioningSource;
         mAdSource = adSource;
         mPlacementData = PlacementData.empty();
+
         mNativeResponseMap = new WeakHashMap<View, NativeResponse>();
+        mViewMap = new HashMap<NativeResponse, WeakReference<View>>();
 
         mPlacementHandler = new Handler();
         mPlacementRunnable = new Runnable() {
@@ -142,7 +176,10 @@ public class MoPubStreamAdPlacer {
      *
      * @param adRenderer The ad renderer.
      */
-    public void registerAdRenderer(final MoPubAdRenderer adRenderer) {
+    public void registerAdRenderer(@NonNull final MoPubAdRenderer adRenderer) {
+        if (!NoThrow.checkNotNull(adRenderer, "Cannot register a null adRenderer")) {
+            return;
+        }
         mAdRenderer = adRenderer;
     }
 
@@ -158,8 +195,8 @@ public class MoPubStreamAdPlacer {
      *
      * @param listener The listener.
      */
-    public void setAdLoadedListener(final MoPubNativeAdLoadedListener listener) {
-        mAdLoadedListener = listener;
+    public void setAdLoadedListener(@Nullable final MoPubNativeAdLoadedListener listener) {
+        mAdLoadedListener = (listener == null) ? EMPTY_NATIVE_AD_LOADED_LISTENER : listener;
     }
 
     /**
@@ -170,14 +207,14 @@ public class MoPubStreamAdPlacer {
      *
      * @param adUnitId The ad unit ID to use when loading ads.
      */
-    public void loadAds(final String adUnitId) {
+    public void loadAds(@NonNull final String adUnitId) {
         loadAds(adUnitId, /* requestParameters */ null);
     }
 
     /**
      * Start loading ads from the MoPub server, using the given request targeting information.
      *
-     * When loading ads, use {@link MoPubNativeAdLoadedListener#onAdLoaded(int)} will be called for
+     * When loading ads, {@link MoPubNativeAdLoadedListener#onAdLoaded(int)} will be called for
      * each ad that is added to the stream.
      *
      * To refresh ads in your stream, call {@code loadAds} again. When new ads load, they will
@@ -188,8 +225,17 @@ public class MoPubStreamAdPlacer {
      * @param adUnitId The ad unit ID to use when loading ads.
      * @param requestParameters Targeting information to pass to the ad server.
      */
-    public void loadAds(final String adUnitId,
-            final RequestParameters requestParameters) {
+    public void loadAds(@NonNull final String adUnitId,
+            @Nullable final RequestParameters requestParameters) {
+        if (!NoThrow.checkNotNull(adUnitId, "Cannot load ads with a null ad unit ID")) {
+            return;
+        }
+
+        if (mAdRenderer == null) {
+            MoPubLog.w("You must call registerAdRenderer before loading ads");
+            return;
+        }
+
         mAdUnitId = adUnitId;
 
         mHasPlacedAds = false;
@@ -198,12 +244,15 @@ public class MoPubStreamAdPlacer {
 
         mPositioningSource.loadPositions(adUnitId, new PositioningListener() {
             @Override
-            public void onLoad(final MoPubClientPositioning positioning) {
+            public void onLoad(@NonNull final MoPubClientPositioning positioning) {
                 handlePositioningLoad(positioning);
             }
 
             @Override
             public void onFailed() {
+                // This will happen only if positions couldn't be loaded after several tries
+                MoPubLog.d("Unable to show ads because ad positions could not be loaded from " +
+                        "the MoPub ad server.");
             }
         });
 
@@ -218,7 +267,7 @@ public class MoPubStreamAdPlacer {
     }
 
     @VisibleForTesting
-    void handlePositioningLoad(final MoPubClientPositioning positioning) {
+    void handlePositioningLoad(@NonNull final MoPubClientPositioning positioning) {
         PlacementData placementData = PlacementData.fromAdPositioning(positioning);
         if (mHasReceivedAds) {
             placeInitialAds(placementData);
@@ -257,7 +306,7 @@ public class MoPubStreamAdPlacer {
      * Inserts ads that should appear in the given range.
      *
      * By default, the ad placer will place ads withing the first 10 positions in your stream,
-     * according the positions you've specified. You can should use this method as your user scrolls
+     * according to the positions you've specified. You can use this method as your user scrolls
      * through your stream to place ads into the currently visible range.
      *
      * This method takes advantage of a short-lived in memory ad cache, and will immediately place
@@ -333,6 +382,7 @@ public class MoPubStreamAdPlacer {
      * @param position The position where to place an ad.
      * @return An object representing ad data.
      */
+    @Nullable
     public Object getAdData(final int position) {
         return mPlacementData.getPlacedAd(position);
     }
@@ -343,36 +393,46 @@ public class MoPubStreamAdPlacer {
      * This method will attempt to reuse the convertView if it is not {@code null}, and will
      * otherwise create it. See {@link MoPubAdRenderer#createAdView(Context, ViewGroup)}.
      *
-     * @param position The position where to place an ad.
+     * @param position The position to place an ad into.
      * @param convertView A recycled view into which to render data, or {@code null}.
      * @param parent The parent that the view will eventually be attached to.
      * @return The newly placed ad view.
      */
-    public View getAdView(final int position, final View convertView, final ViewGroup parent) {
-        if (!isAd(position)) {
+    @Nullable
+    public View getAdView(final int position, @Nullable final View convertView,
+            @Nullable final ViewGroup parent) {
+        final NativeAdData adData = mPlacementData.getPlacedAd(position);
+        if (adData == null) {
             return null;
         }
 
-        final NativeAdData adData = mPlacementData.getPlacedAd(position);
         final MoPubAdRenderer adRenderer = adData.getAdRenderer();
         final View view = (convertView != null) ?
                 convertView : adRenderer.createAdView(mContext, parent);
 
         NativeResponse nativeResponse = adData.getAd();
-        if (!nativeResponse.equals(mNativeResponseMap.get(view))) {
+        WeakReference<View> mappedViewRef = mViewMap.get(nativeResponse);
+        View mappedView = null;
+        if (mappedViewRef != null) {
+            mappedView = mappedViewRef.get();
+        }
+        if (!view.equals(mappedView)) {
+            clearNativeResponse(mappedView);
             clearNativeResponse(view);
             prepareNativeResponse(nativeResponse, view);
+            //noinspection unchecked
             adRenderer.renderAdView(view, nativeResponse);
         }
+
         return view;
     }
 
     /**
-     * Removes ads in the given range from [startRange, endRange).
+     * Removes ads in the given range from [originalStartPosition, originalEndPosition).
      *
-     * @param originalStartPosition The start position to clear, expressed as the original content
+     * @param originalStartPosition The start position to clear (inclusive), expressed as the original content
      * position before ads were inserted.
-     * @param originalEndPosition The position after end position to clear, expressed as the
+     * @param originalEndPosition The position after end position to clear (exclusive), expressed as the
      * original content position before ads were inserted.
      * @return The number of ads removed.
      */
@@ -487,14 +547,17 @@ public class MoPubStreamAdPlacer {
      *
      * You must call this method so that the placer knows where valid positions are to place ads.
      * After calling this method, the ad placer will call {@link
-     * MoPubNativeAdLoadedListener#onAdLoaded
-     * (int)} each time an ad is loaded in the stream.
+     * MoPubNativeAdLoadedListener#onAdLoaded (int)} each time an ad is loaded in the stream.
      *
      * @param originalCount The original number of items.
      */
     public void setItemCount(final int originalCount) {
         mItemCount = mPlacementData.getAdjustedCount(originalCount);
-        notifyNeedsPlacement();
+
+        // If we haven't already placed ads, we'll let ads get placed by the normal loadAds call
+        if (mHasPlacedAds) {
+            notifyNeedsPlacement();
+        }
     }
 
     /**
@@ -509,7 +572,7 @@ public class MoPubStreamAdPlacer {
      *
      * and you insert an item at position 2, your new stream will look like:
      *
-     * {@code Item0 Ad Item1 Item2 New Item Ad Item3}
+     * {@code Item0 Ad Item1 Item2 NewItem Ad Item3}
      *
      * @param originalPosition The position at which to add an item. If you have an adjusted
      * position, you will need to call {@link #getOriginalPosition} to get this value.
@@ -544,6 +607,14 @@ public class MoPubStreamAdPlacer {
      *
      * Use this method if you are moving an item in your stream and want to have ad positions move
      * as well.
+     *
+     * For example if your stream looks like:
+     *
+     * {@code Item0 Ad Item1 Item2 Ad Item3}
+     *
+     * and you move item at position 2 to position 3, your new stream will look like:
+     *
+     * {@code Item0 Ad Item1 Ad Item3 Item2}
      *
      * @param originalPosition The position from which to move an item. If you have an adjusted
      * position, you will need to call {@link #getOriginalPosition} to get this value.
@@ -580,8 +651,12 @@ public class MoPubStreamAdPlacer {
     }
 
     /**
-     * Attempts to place ads in the range (start, end], returning false if there is no ad available
+     * Attempts to place ads in the range [start, end], returning false if there is no ad available
      * to be placed.
+     *
+     * @param start The start of the range in which to place ads, inclusive.
+     * @param end The end of the range in which to place ads, exclusive.
+     * @return false if there is no ad available to be placed.
      */
     private boolean tryPlaceAdsInRange(final int start, final int end) {
         int position = start;
@@ -604,6 +679,9 @@ public class MoPubStreamAdPlacer {
     /**
      * Attempts to place an ad at the given position, returning false if there is no ad available to
      * be placed.
+     *
+     * @param position The position to place the ad at.
+     * @return false if there is no ad available to be placed.
      */
     private boolean tryPlaceAd(final int position) {
         final NativeResponse adResponse = mAdSource.dequeueAd();
@@ -615,25 +693,34 @@ public class MoPubStreamAdPlacer {
         mPlacementData.placeAd(position, adData);
         mItemCount++;
 
-        if (mAdLoadedListener != null) {
-            mAdLoadedListener.onAdLoaded(position);
-        }
+        mAdLoadedListener.onAdLoaded(position);
         return true;
     }
 
-    private NativeAdData createAdData(final int position, final NativeResponse adResponse) {
+    @NonNull
+    private NativeAdData createAdData(final int position, @NonNull final NativeResponse adResponse) {
+        Preconditions.checkNotNull(mAdUnitId);
+        Preconditions.checkNotNull(mAdRenderer);
+
+        //noinspection ConstantConditions
         return new NativeAdData(mAdUnitId, mAdRenderer, adResponse);
     }
 
-    private void clearNativeResponse(final View view) {
+    private void clearNativeResponse(@Nullable final View view) {
+        if (view == null) {
+            return;
+        }
         mImpressionTracker.removeView(view);
         final NativeResponse lastNativeResponse = mNativeResponseMap.get(view);
         if (lastNativeResponse != null) {
             lastNativeResponse.clear(view);
+            mNativeResponseMap.remove(view);
+            mViewMap.remove(lastNativeResponse);
         }
     }
 
-    private void prepareNativeResponse(final NativeResponse nativeResponse, final View view) {
+    private void prepareNativeResponse(@NonNull final NativeResponse nativeResponse, @NonNull final View view) {
+        mViewMap.put(nativeResponse, new WeakReference<View>(view));
         mNativeResponseMap.put(view, nativeResponse);
         if (!nativeResponse.isOverridingImpressionTracker()) {
             mImpressionTracker.addView(view, nativeResponse);

@@ -3,7 +3,9 @@ package com.mopub.mobileads;
 import android.app.Activity;
 import android.content.Context;
 import android.location.Location;
+import android.text.TextUtils;
 
+import com.mopub.common.AdFormat;
 import com.mopub.common.MoPub;
 import com.mopub.common.logging.MoPubLog;
 import com.mopub.mobileads.factories.CustomEventInterstitialAdapterFactory;
@@ -11,8 +13,6 @@ import com.mopub.mobileads.factories.CustomEventInterstitialAdapterFactory;
 import java.util.Map;
 
 import static com.mopub.common.LocationService.LocationAwareness;
-import static com.mopub.common.util.ResponseHeader.CUSTOM_EVENT_DATA;
-import static com.mopub.common.util.ResponseHeader.CUSTOM_EVENT_NAME;
 import static com.mopub.mobileads.MoPubErrorCode.ADAPTER_NOT_FOUND;
 
 public class MoPubInterstitial implements CustomEventInterstitialAdapter.CustomEventInterstitialAdapterListener {
@@ -29,7 +29,7 @@ public class MoPubInterstitial implements CustomEventInterstitialAdapter.CustomE
     private MoPubInterstitialView mInterstitialView;
     private CustomEventInterstitialAdapter mCustomEventInterstitialAdapter;
     private InterstitialAdListener mInterstitialAdListener;
-    private Activity mActivity;
+    private Context mActivity;
     private String mAdUnitId;
     private InterstitialState mCurrentInterstitialState;
     private boolean mIsDestroyed;
@@ -50,7 +50,7 @@ public class MoPubInterstitial implements CustomEventInterstitialAdapter.CustomE
         public void OnInterstitialFailed();
     }
 
-    public MoPubInterstitial(Activity activity, String id) {
+    public MoPubInterstitial(Context activity, String id) {
         mActivity = activity;
         mAdUnitId = id;
 
@@ -121,7 +121,7 @@ public class MoPubInterstitial implements CustomEventInterstitialAdapter.CustomE
         return mInterstitialView.getKeywords();
     }
 
-    public Activity getActivity() {
+    public Context getActivity() {
         return mActivity;
     }
 
@@ -253,8 +253,17 @@ public class MoPubInterstitial implements CustomEventInterstitialAdapter.CustomE
         }
 
         @Override
-        protected void loadCustomEvent(Map<String, String> paramsMap) {
-            if (paramsMap == null) {
+        public AdFormat getAdFormat() {
+            return AdFormat.INTERSTITIAL;
+        }
+
+        @Override
+        protected void loadCustomEvent(String customEventClassName, Map<String, String> serverExtras) {
+            if (mAdViewController == null) {
+                return;
+            }
+
+            if (TextUtils.isEmpty(customEventClassName)) {
                 MoPubLog.d("Couldn't invoke custom event because the server did not specify one.");
                 loadFailUrl(ADAPTER_NOT_FOUND);
                 return;
@@ -268,8 +277,10 @@ public class MoPubInterstitial implements CustomEventInterstitialAdapter.CustomE
 
             mCustomEventInterstitialAdapter = CustomEventInterstitialAdapterFactory.create(
                     MoPubInterstitial.this,
-                    paramsMap.get(CUSTOM_EVENT_NAME.getKey()),
-                    paramsMap.get(CUSTOM_EVENT_DATA.getKey()));
+                    customEventClassName,
+                    serverExtras,
+                    mAdViewController.getBroadcastIdentifier(),
+                    mAdViewController.getAdReport());
             mCustomEventInterstitialAdapter.setAdapterListener(MoPubInterstitial.this);
             mCustomEventInterstitialAdapter.loadInterstitial();
         }

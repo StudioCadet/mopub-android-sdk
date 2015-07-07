@@ -1,10 +1,13 @@
 package com.mopub.nativeads;
 
+import android.net.Uri;
 import android.os.AsyncTask;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 
-import com.mopub.common.util.AsyncTasks;
-import com.mopub.common.util.IntentUtils;
+import com.mopub.common.UrlAction;
 import com.mopub.common.logging.MoPubLog;
+import com.mopub.common.util.AsyncTasks;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -14,13 +17,14 @@ class UrlResolutionTask extends AsyncTask<String, Void, String> {
     private static final int REDIRECT_LIMIT = 10;
 
     interface UrlResolutionListener {
-        void onSuccess(String resolvedUrl);
+        void onSuccess(@NonNull String resolvedUrl);
         void onFailure();
     }
 
-    private final UrlResolutionListener mListener;
+    @NonNull private final UrlResolutionListener mListener;
 
-    public static void getResolvedUrl(final String urlString, final UrlResolutionListener listener) {
+    public static void getResolvedUrl(@NonNull final String urlString,
+            @NonNull final UrlResolutionListener listener) {
         final UrlResolutionTask urlResolutionTask = new UrlResolutionTask(listener);
 
         try {
@@ -32,12 +36,13 @@ class UrlResolutionTask extends AsyncTask<String, Void, String> {
         }
     }
 
-    UrlResolutionTask(UrlResolutionListener listener) {
+    UrlResolutionTask(@NonNull UrlResolutionListener listener) {
         mListener = listener;
     }
 
+    @Nullable
     @Override
-    protected String doInBackground(String... urls) {
+    protected String doInBackground(@Nullable String... urls) {
         if (urls == null || urls.length == 0) {
             return null;
         }
@@ -50,7 +55,7 @@ class UrlResolutionTask extends AsyncTask<String, Void, String> {
             while (locationUrl != null && redirectCount < REDIRECT_LIMIT) {
                 // if location url is not http(s), assume it's an Android deep link
                 // this scheme will fail URL validation so we have to check early
-                if (!IntentUtils.isHttpUrl(locationUrl)) {
+                if (!UrlAction.OPEN_IN_APP_BROWSER.shouldTryHandlingUrl(Uri.parse(locationUrl))) {
                     return locationUrl;
                 }
 
@@ -66,7 +71,8 @@ class UrlResolutionTask extends AsyncTask<String, Void, String> {
         return previousUrl;
     }
 
-    private String getRedirectLocation(final String urlString) throws IOException {
+    @Nullable
+    private String getRedirectLocation(@NonNull final String urlString) throws IOException {
         final URL url = new URL(urlString);
 
         HttpURLConnection httpUrlConnection = null;
@@ -89,7 +95,7 @@ class UrlResolutionTask extends AsyncTask<String, Void, String> {
     }
 
     @Override
-    protected void onPostExecute(final String resolvedUrl) {
+    protected void onPostExecute(@Nullable final String resolvedUrl) {
         super.onPostExecute(resolvedUrl);
 
         if (isCancelled() || resolvedUrl == null) {

@@ -4,15 +4,21 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.support.annotation.Nullable;
+import android.util.Base64;
 import android.view.View;
+
+import com.mopub.common.AdReport;
 import com.mopub.common.logging.MoPubLog;
 import com.mopub.common.util.DateAndTime;
 import com.mopub.common.util.Streams;
-import com.mopub.mobileads.util.Base64;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Locale;
 
 public class AdAlertReporter {
     private static final String EMAIL_RECIPIENT = "creative-review@mopub.com";
@@ -28,30 +34,32 @@ public class AdAlertReporter {
 
     private final View mView;
     private final Context mContext;
-    private final AdConfiguration mAdConfiguration;
     private Intent mEmailIntent;
     private ArrayList<Uri> mEmailAttachments;
     private String mParameters;
     private String mResponse;
 
-    public AdAlertReporter(final Context context, final View view, final AdConfiguration adConfiguration) {
+    public AdAlertReporter(final Context context, final View view, @Nullable final AdReport adReport) {
         mView = view;
         mContext = context;
-        mAdConfiguration = adConfiguration;
 
         mEmailAttachments = new ArrayList<Uri>();
 
-        SimpleDateFormat dateFormat = new SimpleDateFormat(DATE_FORMAT_PATTERN);
+        SimpleDateFormat dateFormat = new SimpleDateFormat(DATE_FORMAT_PATTERN, Locale.US);
         mDateString = dateFormat.format(DateAndTime.now());
 
         initEmailIntent();
         Bitmap screenShot = takeScreenShot();
         String screenShotString = convertBitmapInWEBPToBase64EncodedString(screenShot);
-        mParameters = formParameters();
-        mResponse = getResponseString();
+        mParameters = "";
+        mResponse = "";
+        if (adReport != null) {
+            mParameters = adReport.toString();
+            mResponse = adReport.getResponseString();
+        }
 
         addEmailSubject();
-        addEmailBody( new String[]{ mParameters, mResponse, screenShotString });
+        addEmailBody(mParameters, mResponse, screenShotString);
         addTextAttachment(PARAMETERS_FILENAME, mParameters);
         addTextAttachment(MARKUP_FILENAME, mResponse);
         addImageAttachment(SCREEN_SHOT_FILENAME, screenShot);
@@ -63,13 +71,12 @@ public class AdAlertReporter {
         Intent chooserIntent = Intent.createChooser(mEmailIntent, "Send Email...");
         chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         mContext.startActivity(chooserIntent);
-
     }
 
     private void initEmailIntent() {
         Uri emailScheme = Uri.parse(EMAIL_SCHEME);
-        mEmailIntent = new Intent(Intent.ACTION_SEND_MULTIPLE, emailScheme);
-        mEmailIntent.setType("plain/text");
+        mEmailIntent = new Intent(Intent.ACTION_SEND_MULTIPLE);
+        mEmailIntent.setDataAndType(emailScheme, "plain/text");
         mEmailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{EMAIL_RECIPIENT});
     }
 
@@ -106,38 +113,6 @@ public class AdAlertReporter {
             }
         }
         return result;
-    }
-
-    private String formParameters() {
-        StringBuilder parameters = new StringBuilder();
-
-        if (mAdConfiguration != null) {
-            appendKeyValue(parameters, "sdk_version", mAdConfiguration.getSdkVersion());
-            appendKeyValue(parameters, "creative_id", mAdConfiguration.getDspCreativeId());
-            appendKeyValue(parameters, "platform_version", Integer.toString(mAdConfiguration.getPlatformVersion()));
-            appendKeyValue(parameters, "device_model", mAdConfiguration.getDeviceModel());
-            appendKeyValue(parameters, "ad_unit_id", mAdConfiguration.getAdUnitId());
-            appendKeyValue(parameters, "device_locale", mAdConfiguration.getDeviceLocale());
-            appendKeyValue(parameters, "device_id", mAdConfiguration.getHashedUdid());
-            appendKeyValue(parameters, "network_type", mAdConfiguration.getNetworkType());
-            appendKeyValue(parameters, "platform", mAdConfiguration.getPlatform());
-            appendKeyValue(parameters, "timestamp", getFormattedTimeStamp(mAdConfiguration.getTimeStamp()));
-            appendKeyValue(parameters, "ad_type", mAdConfiguration.getAdType());
-            appendKeyValue(parameters, "ad_size", "{" + mAdConfiguration.getWidth() + ", " + mAdConfiguration.getHeight() + "}");
-        }
-
-        return parameters.toString();
-    }
-
-    private String getResponseString() {
-        return (mAdConfiguration != null) ? mAdConfiguration.getResponseString() : "";
-    }
-
-    private void appendKeyValue(StringBuilder parameters, String key, String value) {
-        parameters.append(key);
-        parameters.append(" : ");
-        parameters.append(value);
-        parameters.append("\n");
     }
 
     private void addEmailSubject() {
@@ -195,15 +170,6 @@ public class AdAlertReporter {
             MoPubLog.d("Unable to write text attachment to file: " + fileName);
         } finally {
             Streams.closeStream(fileOutputStream);
-        }
-    }
-
-    private String getFormattedTimeStamp(long timeStamp) {
-        if (timeStamp != -1) {
-            SimpleDateFormat dateFormat = new SimpleDateFormat(DATE_FORMAT_PATTERN);
-            return dateFormat.format(new Date(timeStamp));
-        } else {
-            return null;
         }
     }
 

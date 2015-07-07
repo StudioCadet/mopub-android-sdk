@@ -1,25 +1,21 @@
 package com.mopub.mobileads;
 
-import android.app.Activity;
 import android.content.Context;
-import android.net.Uri;
-import android.os.Looper;
 
-import com.mopub.mobileads.CustomEventBanner.CustomEventBannerListener;
+import com.mopub.common.AdReport;
+import com.mopub.common.DataKeys;
+import com.mopub.common.logging.MoPubLog;
 import com.mopub.mobileads.factories.HtmlBannerWebViewFactory;
 
 import java.util.Map;
 
-import static com.mopub.mobileads.AdFetcher.CLICKTHROUGH_URL_KEY;
-import static com.mopub.mobileads.AdFetcher.HTML_RESPONSE_BODY_KEY;
-import static com.mopub.mobileads.AdFetcher.REDIRECT_URL_KEY;
-import static com.mopub.mobileads.AdFetcher.SCROLLABLE_KEY;
+import static com.mopub.common.DataKeys.AD_REPORT_KEY;
+import static com.mopub.mobileads.MoPubErrorCode.INTERNAL_ERROR;
 import static com.mopub.mobileads.MoPubErrorCode.NETWORK_INVALID_STATE;
 
 public class HtmlBanner extends CustomEventBanner {
 
     private HtmlBannerWebView mHtmlBannerWebView;
-    private Activity mActivity;
 
     @Override
     protected void loadBanner(
@@ -32,58 +28,37 @@ public class HtmlBanner extends CustomEventBanner {
         String redirectUrl;
         String clickthroughUrl;
         Boolean isScrollable;
+        AdReport adReport;
         if (extrasAreValid(serverExtras)) {
-            htmlData = Uri.decode(serverExtras.get(HTML_RESPONSE_BODY_KEY));
-            redirectUrl = serverExtras.get(REDIRECT_URL_KEY);
-            clickthroughUrl = serverExtras.get(CLICKTHROUGH_URL_KEY);
-            isScrollable = Boolean.valueOf(serverExtras.get(SCROLLABLE_KEY));
+            htmlData = serverExtras.get(DataKeys.HTML_RESPONSE_BODY_KEY);
+            redirectUrl = serverExtras.get(DataKeys.REDIRECT_URL_KEY);
+            clickthroughUrl = serverExtras.get(DataKeys.CLICKTHROUGH_URL_KEY);
+            isScrollable = Boolean.valueOf(serverExtras.get(DataKeys.SCROLLABLE_KEY));
+            try {
+                adReport = (AdReport) localExtras.get(AD_REPORT_KEY);
+            } catch (ClassCastException e) {
+                MoPubLog.e("LocalExtras contained an incorrect type.");
+                customEventBannerListener.onBannerFailed(INTERNAL_ERROR);
+                return;
+            }
         } else {
             customEventBannerListener.onBannerFailed(NETWORK_INVALID_STATE);
             return;
         }
 
-        AdConfiguration adConfiguration = AdConfiguration.extractFromMap(localExtras);
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-        	mHtmlBannerWebView = HtmlBannerWebViewFactory.create(context, customEventBannerListener, isScrollable, redirectUrl, clickthroughUrl, adConfiguration);
-            AdViewController.setShouldHonorServerDimensions(mHtmlBannerWebView);
-            mHtmlBannerWebView.loadHtmlResponse(htmlData);
-        } else {
-        	final Context pContext = context;
-            final CustomEventBannerListener pCustomEventBannerListener = customEventBannerListener;
-            final Boolean pIsScrollable = isScrollable;
-            final String pRedirectUrl = redirectUrl;
-            final String pClickthroughUrl = clickthroughUrl;
-            final AdConfiguration pAdConfiguration = adConfiguration;
-            final String pHtmlData = htmlData;
-            mActivity = (Activity)context; 
-            mActivity.runOnUiThread(new Runnable() {
-    			@Override
-    			public void run() {
-    				mHtmlBannerWebView = HtmlBannerWebViewFactory.create(pContext, pCustomEventBannerListener, pIsScrollable, pRedirectUrl, pClickthroughUrl, pAdConfiguration);
-    		        AdViewController.setShouldHonorServerDimensions(mHtmlBannerWebView);
-    		        mHtmlBannerWebView.loadHtmlResponse(pHtmlData);
-    			}
-    		});
-        }
+        mHtmlBannerWebView = HtmlBannerWebViewFactory.create(context, adReport, customEventBannerListener, isScrollable, redirectUrl, clickthroughUrl);
+        AdViewController.setShouldHonorServerDimensions(mHtmlBannerWebView);
+        mHtmlBannerWebView.loadHtmlResponse(htmlData);
     }
 
     @Override
     protected void onInvalidate() {
         if (mHtmlBannerWebView != null) {
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-        		mHtmlBannerWebView.destroy();
-        	} else {
-        		mActivity.runOnUiThread(new Runnable() {
-    				@Override
-    				public void run() {
-    					mHtmlBannerWebView.destroy();
-    				}
-    			});
-        	}
+            mHtmlBannerWebView.destroy();
         }
     }
 
     private boolean extrasAreValid(Map<String, String> serverExtras) {
-        return serverExtras.containsKey(HTML_RESPONSE_BODY_KEY);
+        return serverExtras.containsKey(DataKeys.HTML_RESPONSE_BODY_KEY);
     }
 }

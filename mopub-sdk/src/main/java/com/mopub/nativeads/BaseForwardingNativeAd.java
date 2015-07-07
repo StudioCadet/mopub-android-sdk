@@ -1,16 +1,24 @@
 package com.mopub.nativeads;
 
 import android.content.Context;
-import android.graphics.Bitmap;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.text.TextUtils;
 import android.view.View;
 
+import com.mopub.common.Preconditions.NoThrow;
 import com.mopub.common.logging.MoPubLog;
+import com.mopub.network.Networking;
+import com.mopub.volley.VolleyError;
+import com.mopub.volley.toolbox.ImageLoader;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.mopub.nativeads.CustomEventNative.CustomEventNativeListener;
 import static com.mopub.nativeads.CustomEventNative.ImageListener;
@@ -22,26 +30,26 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
         public void onAdImpressed();
         public void onAdClicked();
     }
-    private NativeEventListener mNativeEventListener;
+    @Nullable private NativeEventListener mNativeEventListener;
 
     static final double MIN_STAR_RATING = 0;
     static final double MAX_STAR_RATING = 5;
 
     // Basic fields
-    private String mMainImageUrl;
-    private String mIconImageUrl;
-    private String mClickDestinationUrl;
-    private String mCallToAction;
-    private String mTitle;
-    private String mText;
-    private Double mStarRating;
+    @Nullable private String mMainImageUrl;
+    @Nullable private String mIconImageUrl;
+    @Nullable private String mClickDestinationUrl;
+    @Nullable private String mCallToAction;
+    @Nullable private String mTitle;
+    @Nullable private String mText;
+    @Nullable private Double mStarRating;
 
     // Impression logistics
-    private final Set<String> mImpressionTrackers;
+    @NonNull private final Set<String> mImpressionTrackers;
     private int mImpressionMinTimeViewed;
 
     // Extras
-    private final Map<String, Object> mExtras;
+    @NonNull private final Map<String, Object> mExtras;
 
     // Event Logistics
     private boolean mIsOverridingClickTracker;
@@ -58,6 +66,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
     /**
      * Returns the String url corresponding to the ad's main image.
      */
+    @Nullable
     @Override
     final public String getMainImageUrl() {
         return mMainImageUrl;
@@ -66,6 +75,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
     /**
      * Returns the String url corresponding to the ad's icon image.
      */
+    @Nullable
     @Override
     final public String getIconImageUrl() {
         return mIconImageUrl;
@@ -78,6 +88,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * and {@link BaseForwardingNativeAd#getImpressionMinTimeViewed()} for relevant
      * impression-tracking parameters.
      */
+    @NonNull
     @Override
     final public Set<String> getImpressionTrackers() {
         return new HashSet<String>(mImpressionTrackers);
@@ -86,6 +97,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
     /**
      * Returns the String url that the device will attempt to resolve when the ad is clicked.
      */
+    @Nullable
     @Override
     final public String getClickDestinationUrl() {
         return mClickDestinationUrl;
@@ -94,6 +106,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
     /**
      * Returns the Call To Action String (i.e. "Download" or "Learn More") associated with this ad.
      */
+    @Nullable
     @Override
     final public String getCallToAction() {
         return mCallToAction;
@@ -102,6 +115,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
     /**
      * Returns the String corresponding to the ad's title.
      */
+    @Nullable
     @Override
     final public String getTitle() {
         return mTitle;
@@ -110,6 +124,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
     /**
      * Returns the String corresponding to the ad's body text.
      */
+    @Nullable
     @Override
     final public String getText() {
         return mText;
@@ -120,6 +135,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * advertised app. Note that this method may return null if the star rating was either never set
      * or invalid.
      */
+    @Nullable
     @Override
     final public Double getStarRating() {
         return mStarRating;
@@ -150,8 +166,12 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * Given a particular String key, return the associated Object value from the ad's extras map.
      * See {@link BaseForwardingNativeAd#getExtras()} for more information.
      */
+    @Nullable
     @Override
-    final public Object getExtra(final String key) {
+    final public Object getExtra(@NonNull final String key) {
+        if (!NoThrow.checkNotNull(key, "getExtra key is not allowed to be null")) {
+            return null;
+        }
         return mExtras.get(key);
     }
 
@@ -161,6 +181,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * with MoPub's direct-sold native ads or from mediated networks that pass back additional
      * fields.
      */
+    @NonNull
     @Override
     final public Map<String, Object> getExtras() {
         return new HashMap<String, Object>(mExtras);
@@ -190,35 +211,36 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
 
     // Setters
     @Override
-    public final void setNativeEventListener(final NativeEventListener nativeEventListener) {
+    public final void setNativeEventListener(
+            @Nullable final NativeEventListener nativeEventListener) {
         mNativeEventListener = nativeEventListener;
     }
 
-    final void setMainImageUrl(final String mainImageUrl) {
+    final void setMainImageUrl(@Nullable final String mainImageUrl) {
         mMainImageUrl = mainImageUrl;
     }
 
-    final void setIconImageUrl(final String iconImageUrl) {
+    final void setIconImageUrl(@Nullable final String iconImageUrl) {
         mIconImageUrl = iconImageUrl;
     }
 
-    final void setClickDestinationUrl(final String clickDestinationUrl) {
+    final void setClickDestinationUrl(@Nullable final String clickDestinationUrl) {
         mClickDestinationUrl = clickDestinationUrl;
     }
 
-    final void setCallToAction(final String callToAction) {
+    final void setCallToAction(@Nullable final String callToAction) {
         mCallToAction = callToAction;
     }
 
-    final void setTitle(final String title) {
+    final void setTitle(@Nullable final String title) {
         mTitle = title;
     }
 
-    final void setText(final String text) {
+    final void setText(@Nullable final String text) {
         mText = text;
     }
 
-    final void setStarRating(final Double starRating) {
+    final void setStarRating(@Nullable final Double starRating) {
         if (starRating == null) {
             mStarRating = null;
         } else if (starRating >= MIN_STAR_RATING && starRating <= MAX_STAR_RATING) {
@@ -229,11 +251,17 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
         }
     }
 
-    final void addExtra(final String key, final Object value) {
+    final void addExtra(@NonNull final String key, @Nullable final Object value) {
+        if (!NoThrow.checkNotNull(key, "addExtra key is not allowed to be null")) {
+            return;
+        }
         mExtras.put(key, value);
     }
 
-    final void addImpressionTracker(final String url) {
+    final void addImpressionTracker(@NonNull final String url) {
+        if (!NoThrow.checkNotNull(url, "impressionTracker url is not allowed to be null")) {
+            return;
+        }
         mImpressionTrackers.add(url);
     }
 
@@ -259,7 +287,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * This method is optional.
      */
     @Override
-    public void prepare(final View view) { }
+    public void prepare(@Nullable final View view) { }
 
     /**
      * Your base native ad subclass should implement this method if the network requires the developer
@@ -277,7 +305,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * This method is optional.
      */
     @Override
-    public void handleClick(final View view) { }
+    public void handleClick(@Nullable final View view) { }
 
     /**
      * Your base native ad subclass should implement this method if the network requires the developer
@@ -287,7 +315,7 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * This method is optional.
      */
     @Override
-    public void clear(final View view) { }
+    public void clear(@Nullable final View view) { }
 
     /**
      * Your base native ad subclass should implement this method if the network requires the developer
@@ -307,7 +335,9 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * {@link BaseForwardingNativeAd#prepare}.
      */
     protected final void notifyAdImpressed() {
-        mNativeEventListener.onAdImpressed();
+        if (mNativeEventListener != null) {
+            mNativeEventListener.onAdImpressed();
+        }
     }
 
     /**
@@ -318,7 +348,9 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * {@link BaseForwardingNativeAd#prepare}.
      */
     protected final void notifyAdClicked() {
-        mNativeEventListener.onAdClicked();
+        if (mNativeEventListener != null) {
+            mNativeEventListener.onAdClicked();
+        }
     }
 
     /**
@@ -326,19 +358,45 @@ abstract class BaseForwardingNativeAd implements NativeAdInterface {
      * cache before calling {@link CustomEventNativeListener#onNativeAdLoaded}. Doing so will
      * force images to cache before displaying the ad.
      */
-    static void preCacheImages(final Context context,
-            final List<String> imageUrls,
-            final ImageListener imageListener) {
-        ImageService.get(context, imageUrls, new ImageService.ImageServiceListener() {
+    static void preCacheImages(@NonNull final Context context,
+            @NonNull final List<String> imageUrls,
+            @NonNull final ImageListener imageListener) {
+        final ImageLoader imageLoader = Networking.getImageLoader(context);
+        // These Atomics are only accessed on the main thread.
+        // We use Atomics here so we can change their values while keeping a reference for the inner class.
+        final AtomicInteger imageCounter = new AtomicInteger(imageUrls.size());
+        final AtomicBoolean anyFailures = new AtomicBoolean(false);
+        ImageLoader.ImageListener volleyImageListener = new ImageLoader.ImageListener() {
             @Override
-            public void onSuccess(final Map<String, Bitmap> bitmaps) {
-                imageListener.onImagesCached();
+            public void onResponse(final ImageLoader.ImageContainer imageContainer, final boolean isImmediate) {
+                // Image Loader returns a "default" response immediately. We want to ignore this
+                // unless the image is already cached.
+                if (imageContainer.getBitmap() != null) {
+                    final int count = imageCounter.decrementAndGet();
+                    if (count == 0 && !anyFailures.get()) {
+                        imageListener.onImagesCached();
+                    }
+                }
             }
 
             @Override
-            public void onFail() {
-                imageListener.onImagesFailedToCache(NativeErrorCode.IMAGE_DOWNLOAD_FAILURE);
+            public void onErrorResponse(final VolleyError volleyError) {
+                MoPubLog.d("Failed to download a native ads image:", volleyError);
+                boolean anyPreviousErrors = anyFailures.getAndSet(true);
+                imageCounter.decrementAndGet();
+                if (!anyPreviousErrors) {
+                    imageListener.onImagesFailedToCache(NativeErrorCode.IMAGE_DOWNLOAD_FAILURE);
+                }
             }
-        });
+        };
+
+        for (String url : imageUrls) {
+            if (TextUtils.isEmpty(url)) {
+                anyFailures.set(true);
+                imageListener.onImagesFailedToCache(NativeErrorCode.IMAGE_DOWNLOAD_FAILURE);
+                return;
+            }
+            imageLoader.get(url, volleyImageListener);
+        }
     }
 }

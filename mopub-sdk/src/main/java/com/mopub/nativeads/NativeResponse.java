@@ -1,22 +1,21 @@
 package com.mopub.nativeads;
 
 import android.content.Context;
-import android.content.Intent;
-import android.net.Uri;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 
-import com.mopub.common.DownloadResponse;
-import com.mopub.common.HttpClient;
-import com.mopub.common.MoPubBrowser;
 import com.mopub.common.VisibleForTesting;
+import com.mopub.common.event.BaseEvent;
 import com.mopub.common.logging.MoPubLog;
-import com.mopub.common.util.IntentUtils;
-import com.mopub.common.util.ResponseHeader;
 import com.mopub.nativeads.MoPubNative.MoPubNativeEventListener;
+import com.mopub.network.Networking;
+import com.mopub.network.TrackingRequest;
+import com.mopub.volley.VolleyError;
+import com.mopub.volley.toolbox.ImageLoader;
 
-import java.lang.ref.SoftReference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -36,8 +35,6 @@ import static com.mopub.nativeads.NativeResponse.Parameter.MAIN_IMAGE;
 import static com.mopub.nativeads.NativeResponse.Parameter.STAR_RATING;
 import static com.mopub.nativeads.NativeResponse.Parameter.TEXT;
 import static com.mopub.nativeads.NativeResponse.Parameter.TITLE;
-import static com.mopub.nativeads.UrlResolutionTask.UrlResolutionListener;
-import static com.mopub.nativeads.UrlResolutionTask.getResolvedUrl;
 
 public class NativeResponse {
     enum Parameter {
@@ -54,15 +51,16 @@ public class NativeResponse {
         CALL_TO_ACTION("ctatext", false),
         STAR_RATING("starrating", false);
 
-        final String name;
+        @NonNull final String name;
         final boolean required;
 
-        Parameter(final String name, boolean required) {
+        Parameter(@NonNull final String name, boolean required) {
             this.name = name;
             this.required = required;
         }
 
-        static Parameter from(final String name) {
+        @Nullable
+        static Parameter from(@NonNull final String name) {
             for (final Parameter parameter : values()) {
                 if (parameter.name.equals(name)) {
                     return parameter;
@@ -72,6 +70,7 @@ public class NativeResponse {
             return null;
         }
 
+        @NonNull
         @VisibleForTesting
         static final Set<String> requiredKeys = new HashSet<String>();
         static {
@@ -83,24 +82,26 @@ public class NativeResponse {
         }
     }
 
-    private final Context mContext;
-    private MoPubNativeEventListener mMoPubNativeEventListener;
-    private final NativeAdInterface mNativeAd;
+    @NonNull private final Context mContext;
+    @NonNull private final ImageLoader mImageLoader;
+    @NonNull private MoPubNativeEventListener mMoPubNativeEventListener;
+    @NonNull private final NativeAdInterface mNativeAd;
 
     // Impression and click trackers for the MoPub adserver
-    private final Set<String> mMoPubImpressionTrackers;
-    private final String mMoPubClickTracker;
-    private final String mAdUnitId;
+    @NonNull private final Set<String> mMoPubImpressionTrackers;
+    @NonNull private final String mMoPubClickTracker;
+    @NonNull private final String mAdUnitId;
 
     private boolean mRecordedImpression;
     private boolean mIsClicked;
     private boolean mIsDestroyed;
 
-    public NativeResponse(final Context context,
-            final DownloadResponse downloadResponse,
-            final String adUnitId,
-            final NativeAdInterface nativeAd,
-            final MoPubNativeEventListener moPubNativeEventListener) {
+    public NativeResponse(@NonNull final Context context,
+            @NonNull final String impressionUrl,
+            @NonNull final String clickUrl,
+            @NonNull final String adUnitId,
+            @NonNull final NativeAdInterface nativeAd,
+            @NonNull final MoPubNativeEventListener moPubNativeEventListener) {
         mContext = context.getApplicationContext();
         mAdUnitId = adUnitId;
         mMoPubNativeEventListener = moPubNativeEventListener;
@@ -118,8 +119,9 @@ public class NativeResponse {
         });
 
         mMoPubImpressionTrackers = new HashSet<String>();
-        mMoPubImpressionTrackers.add(downloadResponse.getFirstHeader(ResponseHeader.IMPRESSION_URL));
-        mMoPubClickTracker = downloadResponse.getFirstHeader(ResponseHeader.CLICKTHROUGH_URL);
+        mMoPubImpressionTrackers.add(impressionUrl);
+        mMoPubClickTracker = clickUrl;
+        mImageLoader = Networking.getImageLoader(context);
     }
 
     @Override
@@ -141,36 +143,44 @@ public class NativeResponse {
         return stringBuilder.toString();
     }
 
+   @NonNull
    public String getAdUnitId() {
        return mAdUnitId;
    }
 
     // Interface Methods
     // Getters
+    @Nullable
     public String getMainImageUrl() {
         return mNativeAd.getMainImageUrl();
     }
 
+    @Nullable
     public String getIconImageUrl() {
         return mNativeAd.getIconImageUrl();
     }
 
+    @Nullable
     public String getClickDestinationUrl() {
         return mNativeAd.getClickDestinationUrl();
     }
 
+    @Nullable
     public String getCallToAction() {
         return mNativeAd.getCallToAction();
     }
 
+    @Nullable
     public String getTitle() {
         return mNativeAd.getTitle();
     }
 
+    @Nullable
     public String getText() {
         return mNativeAd.getText();
     }
 
+    @NonNull
     public List<String> getImpressionTrackers() {
         final Set<String> allImpressionTrackers = new HashSet<String>();
         allImpressionTrackers.addAll(mMoPubImpressionTrackers);
@@ -178,10 +188,12 @@ public class NativeResponse {
         return new ArrayList<String>(allImpressionTrackers);
     }
 
+    @NonNull
     public String getClickTracker() {
         return mMoPubClickTracker;
     }
 
+    @Nullable
     public Double getStarRating() {
         return mNativeAd.getStarRating();
     }
@@ -195,10 +207,12 @@ public class NativeResponse {
     }
 
     // Extras Getters
+    @Nullable
     public Object getExtra(final String key) {
         return mNativeAd.getExtra(key);
     }
 
+    @NonNull
     public Map<String, Object> getExtras() {
         return mNativeAd.getExtras();
     }
@@ -212,7 +226,7 @@ public class NativeResponse {
     }
 
     // Event Handlers
-    public void prepare(final View view) {
+    public void prepare(@NonNull final View view) {
         if (isDestroyed()) {
             return;
         }
@@ -224,13 +238,14 @@ public class NativeResponse {
         mNativeAd.prepare(view);
     }
 
-    public void recordImpression(final View view) {
+    public void recordImpression(@Nullable final View view) {
         if (getRecordedImpression() || isDestroyed()) {
             return;
         }
 
         for (final String impressionTracker : getImpressionTrackers()) {
-            HttpClient.makeTrackingHttpRequest(impressionTracker, mContext);
+            TrackingRequest.makeTrackingHttpRequest(
+                    impressionTracker, mContext, BaseEvent.Name.IMPRESSION_REQUEST);
         }
 
         mNativeAd.recordImpression();
@@ -239,13 +254,14 @@ public class NativeResponse {
         mMoPubNativeEventListener.onNativeImpression(view);
     }
 
-    public void handleClick(final View view) {
+    public void handleClick(@Nullable final View view) {
         if (isDestroyed()) {
             return;
         }
 
         if (!isClicked()) {
-            HttpClient.makeTrackingHttpRequest(mMoPubClickTracker, mContext);
+            TrackingRequest.makeTrackingHttpRequest(
+                    mMoPubClickTracker, mContext, BaseEvent.Name.CLICK_REQUEST);
         }
 
         openClickDestinationUrl(view);
@@ -255,7 +271,7 @@ public class NativeResponse {
         mMoPubNativeEventListener.onNativeClick(view);
     }
 
-    public void clear(final View view) {
+    public void clear(@NonNull final View view) {
         setOnClickListener(view, null);
 
         mNativeAd.clear(view);
@@ -273,11 +289,11 @@ public class NativeResponse {
     }
 
     // Non Interface Public Methods
-    public void loadMainImage(final ImageView imageView) {
+    public void loadMainImage(@Nullable final ImageView imageView) {
         loadImageView(getMainImageUrl(), imageView);
     }
 
-    public void loadIconImage(final ImageView imageView) {
+    public void loadIconImage(@Nullable final ImageView imageView) {
         loadImageView(getIconImageUrl(), imageView);
     }
 
@@ -301,11 +317,34 @@ public class NativeResponse {
     }
 
     // Helpers
-    private void loadImageView(final String url, final ImageView imageView) {
-        ImageViewService.loadImageView(url, imageView);
+    private void loadImageView(@Nullable final String url, @Nullable final ImageView imageView) {
+        if (imageView == null) {
+            return;
+        }
+
+        if (url == null) {
+            imageView.setImageDrawable(null);
+        } else {
+            mImageLoader.get(url, new ImageLoader.ImageListener() {
+                @Override
+                public void onResponse(final ImageLoader.ImageContainer imageContainer,
+                        final boolean isImmediate) {
+                    if (!isImmediate) {
+                        MoPubLog.d("Image was not loaded immediately into your ad view. You should call preCacheImages as part of your custom event loading process.");
+                    }
+                    imageView.setImageBitmap(imageContainer.getBitmap());
+                }
+
+                @Override
+                public void onErrorResponse(final VolleyError volleyError) {
+                    MoPubLog.d("Failed to load image.", volleyError);
+                    imageView.setImageDrawable(null);
+                }
+            });
+        }
     }
 
-    private void openClickDestinationUrl(final View view) {
+    private void openClickDestinationUrl(@Nullable final View view) {
         if (getClickDestinationUrl() == null) {
             return;
         }
@@ -317,16 +356,13 @@ public class NativeResponse {
         }
 
         final Iterator<String> urlIterator = Arrays.asList(getClickDestinationUrl()).iterator();
-        final ClickDestinationUrlResolutionListener urlResolutionListener = new ClickDestinationUrlResolutionListener(
-                mContext,
-                urlIterator,
-                spinningProgressView
-        );
-
-        getResolvedUrl(urlIterator.next(), urlResolutionListener);
+        final ClickDestinationResolutionListener urlResolutionListener =
+                new ClickDestinationResolutionListener(mContext, urlIterator, spinningProgressView);
+        UrlResolutionTask.getResolvedUrl(urlIterator.next(), urlResolutionListener);
     }
 
-    private void setOnClickListener(final View view, final OnClickListener onClickListener) {
+    private void setOnClickListener(@NonNull final View view,
+            @Nullable final OnClickListener onClickListener) {
         view.setOnClickListener(onClickListener);
         if ((view instanceof ViewGroup)) {
             ViewGroup viewGroup = (ViewGroup)view;
@@ -335,68 +371,21 @@ public class NativeResponse {
         }
     }
 
-    private static class ClickDestinationUrlResolutionListener implements UrlResolutionListener {
-        private final Context mContext;
-        private final Iterator<String> mUrlIterator;
-        private final SoftReference<SpinningProgressView> mSpinningProgressView;
-
-        public ClickDestinationUrlResolutionListener(final Context context,
-                final Iterator<String> urlIterator,
-                final SpinningProgressView spinningProgressView) {
-            mContext = context.getApplicationContext();
-            mUrlIterator = urlIterator;
-            mSpinningProgressView = new SoftReference<SpinningProgressView>(spinningProgressView);
-        }
-
-        @Override
-        public void onSuccess(final String resolvedUrl) {
-            final Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setData(Uri.parse(resolvedUrl));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-            if (IntentUtils.isDeepLink(resolvedUrl) && IntentUtils.deviceCanHandleIntent(mContext, intent)) {
-                // Open another Android app from deep link
-                mContext.startActivity(intent);
-            } else if (mUrlIterator.hasNext()) {
-                // If we can't handle a deep link then try the fallback url
-                getResolvedUrl(mUrlIterator.next(), this);
-                return;
-            } else {
-                // If we can't open the deep link and there are no backup links
-                // Or the link is a browser link then handle it here
-                MoPubBrowser.open(mContext, resolvedUrl);
-            }
-
-            removeSpinningProgressView();
-        }
-
-        @Override
-        public void onFailure() {
-            MoPubLog.d("Failed to resolve URL for click.");
-            removeSpinningProgressView();
-        }
-
-        private void removeSpinningProgressView() {
-            final SpinningProgressView spinningProgressView = mSpinningProgressView.get();
-            if (spinningProgressView != null) {
-                spinningProgressView.removeFromRoot();
-            }
-        }
-    }
-
     @VisibleForTesting
     class NativeViewClickListener implements OnClickListener {
         @Override
-        public void onClick(final View view) {
+        public void onClick(@NonNull final View view) {
             handleClick(view);
         }
     }
 
+    @Nullable
     @Deprecated
     public String getSubtitle() {
         return mNativeAd.getText();
     }
 
+    @NonNull
     @VisibleForTesting
     @Deprecated
     MoPubNativeEventListener getMoPubNativeEventListener() {

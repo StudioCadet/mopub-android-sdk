@@ -1,12 +1,17 @@
 package com.mopub.common;
 
+import android.graphics.Point;
 import android.net.Uri;
+import android.support.annotation.NonNull;
+import android.text.TextUtils;
 
-import static com.mopub.common.util.Strings.isEmpty;
+import com.mopub.network.Networking;
+import com.mopub.network.PlayServicesUrlRewriter;
 
 public abstract class BaseUrlGenerator {
-    private static final String IFA_PREFIX = "ifa:";
-    private static final String SHA_PREFIX = "sha:";
+
+    private static final String WIDTH_KEY = "w";
+    private static final String HEIGHT_KEY = "h";
 
     private StringBuilder mStringBuilder;
     private boolean mFirstParam;
@@ -14,7 +19,8 @@ public abstract class BaseUrlGenerator {
     public abstract String generateUrlString(String serverHostname);
 
     protected void initUrlString(String serverHostname, String handlerType) {
-        mStringBuilder = new StringBuilder("http://" + serverHostname + handlerType);
+        String scheme = Networking.useHttps() ? Constants.HTTPS : Constants.HTTP;
+        mStringBuilder = new StringBuilder(scheme).append("://").append(serverHostname).append(handlerType);
         mFirstParam = true;
     }
 
@@ -23,7 +29,7 @@ public abstract class BaseUrlGenerator {
     }
 
     protected void addParam(String key, String value) {
-        if (value == null || isEmpty(value)) {
+        if (TextUtils.isEmpty(value)) {
             return;
         }
 
@@ -75,5 +81,24 @@ public abstract class BaseUrlGenerator {
 
     protected void setUdid(String udid) {
         addParam("udid", udid);
+    }
+
+    /**
+     * Appends special keys/values for advertising id and do-not-track. PlayServicesUrlRewriter will
+     * replace these templates with the correct values when the request is processed.
+     */
+    protected void appendAdvertisingInfoTemplates() {
+        addParam("udid", PlayServicesUrlRewriter.UDID_TEMPLATE);
+        addParam("dnt", PlayServicesUrlRewriter.DO_NOT_TRACK_TEMPLATE);
+    }
+
+    /**
+     * Adds the width and height.
+     *
+     * @param dimensions The width and height of the screen
+     */
+    protected void setDeviceDimensions(@NonNull final Point dimensions) {
+        addParam(WIDTH_KEY, "" + dimensions.x);
+        addParam(HEIGHT_KEY, "" + dimensions.y);
     }
 }

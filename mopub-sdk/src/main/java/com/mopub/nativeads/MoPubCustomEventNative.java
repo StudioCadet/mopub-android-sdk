@@ -1,87 +1,87 @@
 package com.mopub.nativeads;
 
 import android.content.Context;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 
+import com.mopub.common.event.ErrorEvent;
+import com.mopub.common.event.MoPubEvents;
 import com.mopub.common.logging.MoPubLog;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.json.JSONTokener;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 import static com.mopub.common.util.Numbers.parseDouble;
-import static com.mopub.nativeads.CustomEventNativeAdapter.RESPONSE_BODY_KEY;
+import static com.mopub.common.DataKeys.JSON_BODY_KEY;
 import static com.mopub.nativeads.NativeResponse.Parameter;
 
 public class MoPubCustomEventNative extends CustomEventNative {
 
     @Override
-    protected void loadNativeAd(final Context context,
-            final CustomEventNativeListener customEventNativeListener,
-            final Map<String, Object> localExtras,
-            final Map<String, String> serverExtras) {
+    protected void loadNativeAd(@NonNull final Context context,
+            @NonNull final CustomEventNativeListener customEventNativeListener,
+            @NonNull final Map<String, Object> localExtras,
+            @NonNull final Map<String, String> serverExtras) {
+
+        Object json = localExtras.get(JSON_BODY_KEY);
+        // null or non-JSONObjects should not be passed in localExtras as JSON_BODY_KEY
+        if (!(json instanceof JSONObject)) {
+            customEventNativeListener.onNativeAdFailed(NativeErrorCode.INVALID_JSON);
+            return;
+        }
 
         final MoPubForwardingNativeAd moPubForwardingNativeAd =
                 new MoPubForwardingNativeAd(context.getApplicationContext(),
-                        serverExtras.get(RESPONSE_BODY_KEY),
+                        (JSONObject) json,
                         customEventNativeListener);
 
         try {
             moPubForwardingNativeAd.loadAd();
         } catch (IllegalArgumentException e) {
             customEventNativeListener.onNativeAdFailed(NativeErrorCode.UNSPECIFIED);
-            return;
-        } catch (JSONException e) {
-            customEventNativeListener.onNativeAdFailed(NativeErrorCode.INVALID_JSON);
-            return;
         }
     }
 
     static class MoPubForwardingNativeAd extends BaseForwardingNativeAd {
-        private final Context mContext;
-        private final String mJsonString;
-        private final CustomEventNativeListener mCustomEventNativeListener;
+        @NonNull private final Context mContext;
+        @NonNull private final CustomEventNativeListener mCustomEventNativeListener;
+        @NonNull private final JSONObject mJsonObject;
 
-        MoPubForwardingNativeAd(final Context context,
-                final String jsonString,
-                final CustomEventNativeListener customEventNativeListener) {
+        MoPubForwardingNativeAd(@NonNull final Context context,
+                @NonNull final JSONObject jsonBody,
+                @NonNull final CustomEventNativeListener customEventNativeListener) {
+            mJsonObject = jsonBody;
             mContext = context;
-            mJsonString = jsonString;
             mCustomEventNativeListener = customEventNativeListener;
         }
 
-        void loadAd() throws IllegalArgumentException, JSONException {
-            if (mJsonString == null) {
-                throw new IllegalArgumentException("Json String cannot be null");
-            }
-
-            final JSONTokener jsonTokener = new JSONTokener(mJsonString);
-            final JSONObject jsonObject = new JSONObject(jsonTokener);
-
-            if (!containsRequiredKeys(jsonObject)) {
+        void loadAd() throws IllegalArgumentException {
+            if (!containsRequiredKeys(mJsonObject)) {
                 throw new IllegalArgumentException("JSONObject did not contain required keys.");
             }
 
-            final Iterator<String> keys = jsonObject.keys();
+            final Iterator<String> keys = mJsonObject.keys();
             while (keys.hasNext()) {
                 final String key = keys.next();
                 final Parameter parameter = Parameter.from(key);
 
                 if (parameter != null) {
                     try {
-                        addInstanceVariable(parameter, jsonObject.opt(key));
+                        addInstanceVariable(parameter, mJsonObject.opt(key));
                     } catch (ClassCastException e) {
                         throw new IllegalArgumentException("JSONObject key (" + key + ") contained unexpected value.");
                     }
                 } else {
-                    addExtra(key, jsonObject.opt(key));
+                    addExtra(key, mJsonObject.opt(key));
                 }
             }
 
@@ -98,9 +98,8 @@ public class MoPubCustomEventNative extends CustomEventNative {
             });
         }
 
-        private boolean containsRequiredKeys(final JSONObject jsonObject) {
+        private boolean containsRequiredKeys(@NonNull final JSONObject jsonObject) {
             final Set<String> keys = new HashSet<String>();
-
             final Iterator<String> jsonKeys = jsonObject.keys();
             while (jsonKeys.hasNext()) {
                 keys.add(jsonKeys.next());
@@ -109,7 +108,8 @@ public class MoPubCustomEventNative extends CustomEventNative {
             return keys.containsAll(Parameter.requiredKeys);
         }
 
-        private void addInstanceVariable(final Parameter key, final Object value) throws ClassCastException {
+        private void addInstanceVariable(@NonNull final Parameter key,
+                @Nullable final Object value) throws ClassCastException {
             try {
                 switch (key) {
                     case MAIN_IMAGE:
@@ -167,10 +167,11 @@ public class MoPubCustomEventNative extends CustomEventNative {
             }
         }
 
-        private boolean isImageKey(final String name) {
-            return name != null && name.toLowerCase().endsWith("image");
+        private boolean isImageKey(@Nullable final String name) {
+            return name != null && name.toLowerCase(Locale.US).endsWith("image");
         }
 
+        @NonNull
         List<String> getExtrasImageUrls() {
             final List<String> extrasBitmapUrls = new ArrayList<String>(getExtras().size());
             for (final Map.Entry<String, Object> entry : getExtras().entrySet()) {
@@ -182,6 +183,7 @@ public class MoPubCustomEventNative extends CustomEventNative {
             return extrasBitmapUrls;
         }
 
+        @NonNull
         List<String> getAllImageUrls() {
             final List<String> imageUrls = new ArrayList<String>();
             if (getMainImageUrl() != null) {

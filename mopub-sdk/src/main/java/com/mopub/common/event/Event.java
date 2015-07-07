@@ -1,12 +1,24 @@
 package com.mopub.common.event;
 
-import com.mopub.common.ClientMetadata;
+import android.support.annotation.NonNull;
 
 /**
  * Immutable data class with client event data.
  */
 public class Event extends BaseEvent {
-    Event(final Type eventType, final String requestUrl, final ClientMetadata metadata) {
-        super(eventType, requestUrl, metadata);
+    private Event(@NonNull Builder builder) {
+        super(builder);
+    }
+
+    public static class Builder extends BaseEvent.Builder {
+        public Builder(@NonNull Name name, @NonNull Category category, double samplingRate) {
+            super(ScribeCategory.EXCHANGE_CLIENT_EVENT, name, category, samplingRate);
+        }
+
+        @NonNull
+        @Override
+        public Event build() {
+            return new Event(this);
+        }
     }
 }

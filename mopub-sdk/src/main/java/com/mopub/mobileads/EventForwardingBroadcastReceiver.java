@@ -6,19 +6,20 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.support.v4.content.LocalBroadcastManager;
 
+import com.mopub.common.DataKeys;
+
 import static com.mopub.mobileads.CustomEventInterstitial.CustomEventInterstitialListener;
 import static com.mopub.mobileads.MoPubErrorCode.NETWORK_INVALID_STATE;
 
-class EventForwardingBroadcastReceiver extends BroadcastReceiver {
+public class EventForwardingBroadcastReceiver extends BroadcastReceiver {
     private final CustomEventInterstitialListener mCustomEventInterstitialListener;
     private final long mBroadcastIdentifier;
     private Context mContext;
 
-    static final String BROADCAST_IDENTIFIER_KEY = "broadcastIdentifier";
-    static final String ACTION_INTERSTITIAL_FAIL = "com.mopub.action.interstitial.fail";
-    static final String ACTION_INTERSTITIAL_SHOW = "com.mopub.action.interstitial.show";
-    static final String ACTION_INTERSTITIAL_DISMISS = "com.mopub.action.interstitial.dismiss";
-    static final String ACTION_INTERSTITIAL_CLICK = "com.mopub.action.interstitial.click";
+    public static final String ACTION_INTERSTITIAL_FAIL = "com.mopub.action.interstitial.fail";
+    public static final String ACTION_INTERSTITIAL_SHOW = "com.mopub.action.interstitial.show";
+    public static final String ACTION_INTERSTITIAL_DISMISS = "com.mopub.action.interstitial.dismiss";
+    public static final String ACTION_INTERSTITIAL_CLICK = "com.mopub.action.interstitial.click";
     private static IntentFilter sIntentFilter;
 
 
@@ -30,11 +31,11 @@ class EventForwardingBroadcastReceiver extends BroadcastReceiver {
 
     static void broadcastAction(final Context context, final long broadcastIdentifier, final String action) {
         Intent intent = new Intent(action);
-        intent.putExtra(BROADCAST_IDENTIFIER_KEY, broadcastIdentifier);
+        intent.putExtra(DataKeys.BROADCAST_IDENTIFIER_KEY, broadcastIdentifier);
         LocalBroadcastManager.getInstance(context.getApplicationContext()).sendBroadcast(intent);
     }
 
-    static IntentFilter getHtmlInterstitialIntentFilter() {
+    public static IntentFilter getHtmlInterstitialIntentFilter() {
         if (sIntentFilter == null) {
             sIntentFilter = new IntentFilter();
             sIntentFilter.addAction(ACTION_INTERSTITIAL_FAIL);
@@ -57,7 +58,7 @@ class EventForwardingBroadcastReceiver extends BroadcastReceiver {
          * this here because there is no appropriate IntentFilter condition that can recreate this
          * behavior.
          */
-        final long receivedIdentifier = intent.getLongExtra(BROADCAST_IDENTIFIER_KEY, -1);
+        final long receivedIdentifier = intent.getLongExtra(DataKeys.BROADCAST_IDENTIFIER_KEY, -1);
         if (mBroadcastIdentifier != receivedIdentifier) {
             return;
         }

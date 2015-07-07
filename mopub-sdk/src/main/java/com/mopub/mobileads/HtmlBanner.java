@@ -1,21 +1,24 @@
 package com.mopub.mobileads;
 
+import static com.mopub.common.DataKeys.AD_REPORT_KEY;
+import static com.mopub.mobileads.MoPubErrorCode.INTERNAL_ERROR;
+import static com.mopub.mobileads.MoPubErrorCode.NETWORK_INVALID_STATE;
+
+import java.util.Map;
+
+import android.app.Activity;
 import android.content.Context;
+import android.os.Looper;
 
 import com.mopub.common.AdReport;
 import com.mopub.common.DataKeys;
 import com.mopub.common.logging.MoPubLog;
 import com.mopub.mobileads.factories.HtmlBannerWebViewFactory;
 
-import java.util.Map;
-
-import static com.mopub.common.DataKeys.AD_REPORT_KEY;
-import static com.mopub.mobileads.MoPubErrorCode.INTERNAL_ERROR;
-import static com.mopub.mobileads.MoPubErrorCode.NETWORK_INVALID_STATE;
-
 public class HtmlBanner extends CustomEventBanner {
 
     private HtmlBannerWebView mHtmlBannerWebView;
+    private Activity mActivity;
 
     @Override
     protected void loadBanner(
@@ -46,15 +49,44 @@ public class HtmlBanner extends CustomEventBanner {
             return;
         }
 
-        mHtmlBannerWebView = HtmlBannerWebViewFactory.create(context, adReport, customEventBannerListener, isScrollable, redirectUrl, clickthroughUrl);
-        AdViewController.setShouldHonorServerDimensions(mHtmlBannerWebView);
-        mHtmlBannerWebView.loadHtmlResponse(htmlData);
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+        	mHtmlBannerWebView = HtmlBannerWebViewFactory.create(context, adReport, customEventBannerListener, isScrollable, redirectUrl, clickthroughUrl);
+            AdViewController.setShouldHonorServerDimensions(mHtmlBannerWebView);
+            mHtmlBannerWebView.loadHtmlResponse(htmlData);
+        } else {
+        	final Context pContext = context;
+            final CustomEventBannerListener pCustomEventBannerListener = customEventBannerListener;
+            final Boolean pIsScrollable = isScrollable;
+            final String pRedirectUrl = redirectUrl;
+            final String pClickthroughUrl = clickthroughUrl;
+            final String pHtmlData = htmlData;
+            final AdReport pAdReport = adReport;
+            mActivity = (Activity)context; 
+            mActivity.runOnUiThread(new Runnable() {
+    			@Override
+    			public void run() {
+    				mHtmlBannerWebView = HtmlBannerWebViewFactory.create(pContext, pAdReport, pCustomEventBannerListener, pIsScrollable, pRedirectUrl, pClickthroughUrl);
+    		        AdViewController.setShouldHonorServerDimensions(mHtmlBannerWebView);
+    		        mHtmlBannerWebView.loadHtmlResponse(pHtmlData);
+    			}
+    		});
+        }
+        
     }
 
     @Override
     protected void onInvalidate() {
         if (mHtmlBannerWebView != null) {
-            mHtmlBannerWebView.destroy();
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+        		mHtmlBannerWebView.destroy();
+        	} else {
+        		mActivity.runOnUiThread(new Runnable() {
+    				@Override
+    				public void run() {
+    					mHtmlBannerWebView.destroy();
+    				}
+    			});
+        	}
         }
     }
 

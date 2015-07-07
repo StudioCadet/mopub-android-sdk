@@ -6,6 +6,7 @@ import android.location.Location;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Handler;
+import android.os.Looper;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
@@ -127,7 +128,7 @@ public class AdViewController {
             }
         };
         mRefreshTimeMillis = DEFAULT_REFRESH_TIME_MILLISECONDS;
-        mHandler = new Handler();
+        mHandler = new Handler(Looper.getMainLooper());
     }
 
     @VisibleForTesting
@@ -548,12 +549,17 @@ public class AdViewController {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                MoPubView moPubView = getMoPubView();
-                if (moPubView == null) {
-                    return;
-                }
-                moPubView.removeAllViews();
-                moPubView.addView(view, getAdLayoutParams(view));
+            	MoPubView moPubView = getMoPubView();
+            	if (moPubView == null) {
+            		return;
+            	}
+            	try {
+            		moPubView.removeAllViews();
+	                moPubView.addView(view, getAdLayoutParams(view));
+            	}
+            	catch(Exception e) {
+            		moPubView.adFailed(MoPubErrorCode.INTERNAL_ERROR);
+            	}
             }
         });
     }

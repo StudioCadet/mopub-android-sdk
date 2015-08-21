@@ -8,30 +8,25 @@ import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
-import com.mopub.common.DownloadResponse;
 import com.mopub.common.test.support.SdkTestRunner;
-import com.mopub.common.util.ResponseHeader;
 import com.mopub.common.util.Utils;
-import com.mopub.mobileads.test.support.TestHttpResponseWithHeaders;
 
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
 
-import static com.mopub.nativeads.MoPubNative.MoPubNativeListener;
 import static org.fest.assertions.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 @RunWith(SdkTestRunner.class)
 public class MoPubNativeAdRendererTest {
     private MoPubNativeAdRenderer subject;
-    private Activity context;
     private RelativeLayout relativeLayout;
     private ViewGroup viewGroup;
     private NativeResponse nativeResponse;
-    private BaseForwardingNativeAd mNativeAd;
     private ViewBinder viewBinder;
     private TextView titleView;
     private TextView textView;
@@ -42,21 +37,22 @@ public class MoPubNativeAdRendererTest {
 
     @Before
     public void setUp() throws Exception {
-        context = new Activity();
+        Activity context = Robolectric.buildActivity(Activity.class).create().get();
         relativeLayout = new RelativeLayout(context);
         relativeLayout.setId((int) Utils.generateUniqueId());
         viewGroup = new LinearLayout(context);
 
-        mNativeAd = new BaseForwardingNativeAd() {};
-        mNativeAd.setTitle("test title");
-        mNativeAd.setText("test text");
-        mNativeAd.setCallToAction("test call to action");
-        mNativeAd.setClickDestinationUrl("destinationUrl");
+        BaseForwardingNativeAd baseForwardingNativeAd = new BaseForwardingNativeAd() {};
+        baseForwardingNativeAd.setTitle("test title");
+        baseForwardingNativeAd.setText("test text");
+        baseForwardingNativeAd.setCallToAction("test call to action");
+        baseForwardingNativeAd.setClickDestinationUrl("destinationUrl");
 
-        final TestHttpResponseWithHeaders testHttpResponseWithHeaders = new TestHttpResponseWithHeaders(200, "");
-        testHttpResponseWithHeaders.addHeader(ResponseHeader.CLICKTHROUGH_URL.getKey(), "clickTrackerUrl");
-        final DownloadResponse downloadResponse = new DownloadResponse(testHttpResponseWithHeaders);
-        nativeResponse = new NativeResponse(context, downloadResponse, "test ID", mNativeAd, mock(MoPubNativeListener.class));
+        nativeResponse = new NativeResponse(context,
+                "impressionTrackerUrl",
+                "clickTrackerUrl",
+                "test ID", baseForwardingNativeAd,
+                mock(MoPubNative.MoPubNativeListener.class));
 
         titleView = new TextView(context);
         titleView.setId((int) Utils.generateUniqueId());
@@ -105,6 +101,8 @@ public class MoPubNativeAdRendererTest {
     }
 
     @Rule public ExpectedException exception = ExpectedException.none();
+
+    @Test
     public void renderAdView_withNullViewBinder_shouldThrowNPE() {
         subject = new MoPubNativeAdRenderer(null);
 
@@ -125,7 +123,7 @@ public class MoPubNativeAdRendererTest {
     }
 
     @Test
-    public void renderAdView_withFailedViewBinder_shouldReturnFast() {
+    public void renderAdView_withFailedViewBinder_shouldReturnEmptyViews() {
         viewBinder = new ViewBinder.Builder(relativeLayout.getId())
                 .titleId(titleView.getId())
                 .textId(badView.getId())
@@ -137,30 +135,31 @@ public class MoPubNativeAdRendererTest {
         subject = new MoPubNativeAdRenderer(viewBinder);
         subject.renderAdView(relativeLayout, nativeResponse);
 
-        assertThat(((TextView)relativeLayout.findViewById(titleView.getId())).getText()).isEqualTo("");
-        assertThat(((TextView)relativeLayout.findViewById(textView.getId())).getText()).isEqualTo(
-                "");
-        assertThat(((TextView)relativeLayout.findViewById(callToActionView.getId())).getText()).isEqualTo(
-                "");
+        assertThat(((TextView)relativeLayout.findViewById(titleView.getId())).getText())
+                .isEqualTo("");
+        assertThat(((TextView)relativeLayout.findViewById(textView.getId())).getText())
+                .isEqualTo("");
+        assertThat(((TextView)relativeLayout.findViewById(callToActionView.getId())).getText())
+                .isEqualTo("");
     }
 
     @Test
-    public void getOrCreateNativeViewHolder_withNoViewHolder_shouldCreateNativeViewHolder() {
-        final NativeViewHolder viewHolder =
-                subject.getOrCreateNativeViewHolder(relativeLayout, viewBinder);
+    public void renderAdView_withNoViewHolder_shouldCreateNativeViewHolder() {
+        subject.renderAdView(relativeLayout, nativeResponse);
 
-        final NativeViewHolder expectedViewHolder =
-                NativeViewHolder.fromViewBinder(relativeLayout, viewBinder);
+        NativeViewHolder expectedViewHolder = NativeViewHolder.fromViewBinder(relativeLayout, viewBinder);
+        NativeViewHolder viewHolder = subject.mViewHolderMap.get(relativeLayout);
         compareNativeViewHolders(expectedViewHolder, viewHolder);
     }
 
     @Test
     public void getOrCreateNativeViewHolder_withViewHolder_shouldNotReCreateNativeViewHolder() {
-        final NativeViewHolder viewHolder =
-                subject.getOrCreateNativeViewHolder(relativeLayout, viewBinder);
+        subject.renderAdView(relativeLayout, nativeResponse);
+        NativeViewHolder expectedViewHolder = subject.mViewHolderMap.get(relativeLayout);
+        subject.renderAdView(relativeLayout, nativeResponse);
 
-        assertThat(subject.getOrCreateNativeViewHolder(relativeLayout, viewBinder))
-                .isEqualTo(viewHolder);
+        NativeViewHolder viewHolder = subject.mViewHolderMap.get(relativeLayout);
+        assertThat(viewHolder).isEqualTo(expectedViewHolder);
     }
 
     static private void compareNativeViewHolders(final NativeViewHolder actualViewHolder,

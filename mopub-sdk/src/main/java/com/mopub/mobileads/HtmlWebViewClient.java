@@ -1,22 +1,36 @@
 package com.mopub.mobileads;
 
 import android.content.Context;
-import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.support.annotation.NonNull;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import com.mopub.common.MoPubBrowser;
+import com.mopub.common.UrlHandler;
+import com.mopub.common.UrlAction;
 import com.mopub.common.logging.MoPubLog;
-import com.mopub.common.util.IntentUtils;
-import com.mopub.mobileads.util.Utils;
+import com.mopub.common.util.Intents;
+import com.mopub.exceptions.IntentNotResolvableException;
+
+import java.util.EnumSet;
 
 import static com.mopub.mobileads.MoPubErrorCode.UNSPECIFIED;
 
 class HtmlWebViewClient extends WebViewClient {
     static final String MOPUB_FINISH_LOAD = "mopub://finishLoad";
     static final String MOPUB_FAIL_LOAD = "mopub://failLoad";
+
+    private final EnumSet<UrlAction> SUPPORTED_URL_ACTIONS = EnumSet.of(
+            UrlAction.HANDLE_MOPUB_SCHEME,
+            UrlAction.IGNORE_ABOUT_SCHEME,
+            UrlAction.HANDLE_PHONE_SCHEME,
+            UrlAction.OPEN_APP_MARKET,
+            UrlAction.OPEN_NATIVE_BROWSER,
+            UrlAction.OPEN_IN_APP_BROWSER,
+            UrlAction.HANDLE_SHARE_TWEET,
+            UrlAction.FOLLOW_DEEP_LINK_WITH_FALLBACK,
+            UrlAction.FOLLOW_DEEP_LINK);
 
     private final Context mContext;
     private HtmlWebViewListener mHtmlWebViewListener;
@@ -33,21 +47,41 @@ class HtmlWebViewClient extends WebViewClient {
     }
 
     @Override
-    public boolean shouldOverrideUrlLoading(WebView view, String url) {
-        if (handleSpecialMoPubScheme(url) || handlePhoneScheme(url) || handleNativeBrowserScheme(url)) {
-            return true;
-        }
+    public boolean shouldOverrideUrlLoading(final WebView view, final String url) {
+        new UrlHandler.Builder()
+                .withSupportedUrlActions(SUPPORTED_URL_ACTIONS)
+                .withResultActions(new UrlHandler.ResultActions() {
+                    @Override
+                    public void urlHandlingSucceeded(@NonNull String url,
+                            @NonNull UrlAction urlAction) {
+                        if (mHtmlWebView.wasClicked()) {
+                            mHtmlWebViewListener.onClicked();
+                            mHtmlWebView.onResetUserClick();
+                        }
+                    }
 
-        MoPubLog.d("Ad clicked. Click URL: " + url);
+                    @Override
+                    public void urlHandlingFailed(@NonNull String url,
+                            @NonNull UrlAction lastFailedUrlAction) {
+                    }
+                })
+                .withMoPubSchemeListener(new UrlHandler.MoPubSchemeListener() {
+                    @Override
+                    public void onFinishLoad() {
+                        mHtmlWebViewListener.onLoaded(mHtmlWebView);
+                    }
 
-        // this is added because http/s can also be intercepted
-        if (!isWebSiteUrl(url) && IntentUtils.canHandleApplicationUrl(mContext, url)) {
-            if (launchApplicationUrl(url)) {
-                return true;
-            }
-        }
+                    @Override
+                    public void onClose() {
+                        mHtmlWebViewListener.onCollapsed();
+                    }
 
-        showMoPubBrowserForUrl(url);
+                    @Override
+                    public void onFailLoad() {
+                        mHtmlWebViewListener.onFailed(UNSPECIFIED);
+                    }
+                })
+                .build().handleUrl(mContext, url, mHtmlWebView.wasClicked());
         return true;
     }
 
@@ -56,156 +90,16 @@ class HtmlWebViewClient extends WebViewClient {
         // If the URL being loaded shares the redirectUrl prefix, open it in the browser.
         if (mRedirectUrl != null && url.startsWith(mRedirectUrl)) {
             view.stopLoading();
-            showMoPubBrowserForUrl(url);
+            if (mHtmlWebView.wasClicked()) {
+                try {
+                    Intents.showMoPubBrowserForUrl(mContext, Uri.parse(url));
+                } catch (IntentNotResolvableException e) {
+                    MoPubLog.d(e.getMessage());
+                }
+            } else {
+                MoPubLog.d("Attempted to redirect without user interaction");
+            }
         }
     }
 
-    private boolean isSpecialMoPubScheme(String url) {
-        return url.startsWith("mopub://");
-    }
-
-    private boolean handleSpecialMoPubScheme(String url) {
-        if (!isSpecialMoPubScheme(url)) {
-            return false;
-        }
-        Uri uri = Uri.parse(url);
-        String host = uri.getHost();
-
-        if ("finishLoad".equals(host)) {
-            mHtmlWebViewListener.onLoaded(mHtmlWebView);
-        } else if ("close".equals(host)) {
-            mHtmlWebViewListener.onCollapsed();
-        } else if ("failLoad".equals(host)) {
-            mHtmlWebViewListener.onFailed(UNSPECIFIED);
-        } else if ("custom".equals(host)) {
-            handleCustomIntentFromUri(uri);
-        }
-
-        return true;
-    }
-
-    private boolean isPhoneScheme(String url) {
-        return url.startsWith("tel:") || url.startsWith("voicemail:") ||
-                url.startsWith("sms:") || url.startsWith("mailto:") ||
-                url.startsWith("geo:") || url.startsWith("google.streetview:");
-    }
-
-    private boolean handlePhoneScheme(String url) {
-        if (!isPhoneScheme(url)) {
-            return false;
-        }
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-        String errorMessage = "Could not handle intent with URI: " + url
-                + ". Is this intent supported on your phone?";
-
-        launchIntentForUserClick(mContext, intent, errorMessage);
-
-        return true;
-    }
-
-    private boolean isNativeBrowserScheme(String url) {
-        return url.startsWith("mopubnativebrowser://");
-    }
-
-    private boolean handleNativeBrowserScheme(String url) {
-        if (!isNativeBrowserScheme(url)) {
-            return false;
-        }
-
-        Uri uri = Uri.parse(url);
-
-        String urlToOpenInNativeBrowser;
-        try {
-            urlToOpenInNativeBrowser = uri.getQueryParameter("url");
-        } catch (UnsupportedOperationException e) {
-            MoPubLog.w("Could not handle url: " + url);
-            return false;
-        }
-
-        if (!"navigate".equals(uri.getHost()) || urlToOpenInNativeBrowser == null) {
-            return false;
-        }
-
-        Uri intentUri = Uri.parse(urlToOpenInNativeBrowser);
-
-        Intent intent = new Intent(Intent.ACTION_VIEW, intentUri);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-        String errorMessage = "Could not handle intent with URI: " + url
-                + ". Is this intent supported on your phone?";
-
-        launchIntentForUserClick(mContext, intent, errorMessage);
-
-        return true;
-    }
-
-    private boolean isWebSiteUrl(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
-    }
-
-    private boolean launchApplicationUrl(String url) {
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-        String errorMessage = "Unable to open intent.";
-
-        return launchIntentForUserClick(mContext, intent, errorMessage);
-    }
-
-    private void showMoPubBrowserForUrl(String url) {
-        if (url == null || url.equals("")) url = "about:blank";
-        MoPubLog.d("Final URI to show in browser: " + url);
-        Intent intent = new Intent(mContext, MoPubBrowser.class);
-        intent.putExtra(MoPubBrowser.DESTINATION_URL_KEY, url);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-        String errorMessage = "Could not handle intent action. "
-                + ". Perhaps you forgot to declare com.mopub.common.MoPubBrowser"
-                + " in your Android manifest file.";
-
-        boolean handledByMoPubBrowser = launchIntentForUserClick(mContext, intent, errorMessage);
-
-        if (!handledByMoPubBrowser) {
-            intent = new Intent(Intent.ACTION_VIEW, Uri.parse("about:blank"));
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            launchIntentForUserClick(mContext, intent, null);
-        }
-    }
-
-    private void handleCustomIntentFromUri(Uri uri) {
-        String action;
-        String adData;
-        try {
-            action = uri.getQueryParameter("fnc");
-            adData = uri.getQueryParameter("data");
-        } catch (UnsupportedOperationException e) {
-            MoPubLog.w("Could not handle custom intent with uri: " + uri);
-            return;
-        }
-
-        Intent customIntent = new Intent(action);
-        customIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        customIntent.putExtra(HtmlBannerWebView.EXTRA_AD_CLICK_DATA, adData);
-
-        String errorMessage = "Could not handle custom intent: " + action
-                + ". Is your intent spelled correctly?";
-
-        launchIntentForUserClick(mContext, customIntent, errorMessage);
-    }
-
-    boolean launchIntentForUserClick(Context context, Intent intent, String errorMessage) {
-        if (!mHtmlWebView.wasClicked()) {
-            return false;
-        }
-
-        boolean wasIntentStarted = Utils.executeIntent(context, intent, errorMessage);
-        if (wasIntentStarted) {
-            mHtmlWebViewListener.onClicked();
-            mHtmlWebView.onResetUserClick();
-        }
-
-        return wasIntentStarted;
-    }
 }

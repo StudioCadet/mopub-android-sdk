@@ -2,9 +2,11 @@ package com.mopub.common.util;
 
 import android.app.Activity;
 import android.view.View;
+
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 
 import static com.mopub.common.util.Reflection.MethodBuilder;
@@ -21,7 +23,7 @@ public class ReflectionTest {
 
     @Before
     public void setup(){
-        activity = new Activity();
+        activity = Robolectric.buildActivity(Activity.class).create().get();
         view = new View(activity);
         string = "goat";
     }
@@ -145,14 +147,15 @@ public class ReflectionTest {
         assertThat(methodBuilder.execute()).isEqualTo("20");
     }
 
-//    @Test
-//    public void execute_withAccessibility_shouldRunPrivateMethods() throws Exception {
-//        methodBuilder = new MethodBuilder(string, "foldCase");
-//        methodBuilder.addParam(char.class, 'a');
-//        methodBuilder.setAccessible();
-//
-//        char result = (Character) methodBuilder.execute();
-//
-//        assertThat(result).isEqualTo('a');
-//    }
+    @Test
+    public void execute_withAccessibility_shouldRunPrivateMethods() throws Exception {
+        methodBuilder = new MethodBuilder(string, "indexOfSupplementary");
+        methodBuilder.addParam(int.class, (int)'a');
+        methodBuilder.addParam(int.class, 0);
+        methodBuilder.setAccessible();
+
+        int result = (Integer) methodBuilder.execute();
+
+        assertThat(result).isEqualTo(-1);
+    }
 }

@@ -53,7 +53,7 @@ public class GpsHelperTest {
 
     @Before
     public void setup() {
-    	context = new Activity();
+    	context = Robolectric.buildActivity(Activity.class).create().get();
         adInfo = new TestAdInfo();
 
         methodBuilder = TestMethodBuilderFactory.getSingletonMock();
@@ -300,7 +300,7 @@ public class GpsHelperTest {
 
     static public void verifyClientMetadata(Context context, TestAdInfo adInfo) {
         ClientMetadata clientMetadata = ClientMetadata.getInstance(context);
-        assertThat(clientMetadata.getAdvertisingId()).isEqualTo("ifa:" + adInfo.getId());
+        assertThat(clientMetadata.getDeviceId()).isEqualTo("ifa:" + adInfo.getId());
         assertThat(clientMetadata.isDoNotTrackSet()).isEqualTo(adInfo.isLimitAdTrackingEnabled());
     }
 

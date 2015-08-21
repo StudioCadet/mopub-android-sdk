@@ -1,6 +1,7 @@
 package com.mopub.simpleadsdemo;
 
 import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.support.v4.app.Fragment;
 
 import java.util.Comparator;
@@ -18,7 +19,9 @@ class MoPubSampleAdUnit implements Comparable<MoPubSampleAdUnit> {
         BANNER("Banner", BannerDetailFragment.class),
         MRECT("Mrect", MrectDetailFragment.class),
         INTERSTITIAL("Interstitial", InterstitialDetailFragment.class),
+        REWARDED_VIDEO("Rewarded Video", RewardedVideoDetailFragment.class),
         LIST_VIEW("Native List View", NativeListViewFragment.class),
+        RECYCLER_VIEW("Native Recycler View", NativeRecyclerViewFragment.class),
         CUSTOM_NATIVE("Native Gallery (Custom Stream)", NativeGalleryFragment.class);
 
         String getName() {
@@ -158,7 +161,7 @@ class MoPubSampleAdUnit implements Comparable<MoPubSampleAdUnit> {
     }
 
     @Override
-    public int compareTo(MoPubSampleAdUnit that) {
+    public int compareTo(@NonNull MoPubSampleAdUnit that) {
         if (mAdType != that.mAdType) {
             return mAdType.ordinal() - that.mAdType.ordinal();
         }

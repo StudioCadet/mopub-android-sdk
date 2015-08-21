@@ -1,24 +1,25 @@
 package com.mopub.nativeads;
 
 import android.app.Activity;
+import android.support.annotation.NonNull;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
-import com.mopub.common.DownloadResponse;
 import com.mopub.common.test.support.SdkTestRunner;
-import com.mopub.common.util.ResponseHeader;
 import com.mopub.common.util.Utils;
-import com.mopub.mobileads.test.support.TestHttpResponseWithHeaders;
+import com.mopub.network.MoPubRequestQueue;
+import com.mopub.network.Networking;
+import com.mopub.volley.Request;
 
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
 import org.robolectric.Robolectric;
-import org.robolectric.tester.org.apache.http.HttpRequestInfo;
 
 import java.util.List;
 import java.util.Map;
@@ -29,7 +30,9 @@ import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
 
 @RunWith(SdkTestRunner.class)
@@ -44,11 +47,18 @@ public class NativeResponseTest {
     private NativeAdInterface mMockNativeAd;
     private boolean baseNativeAdRecordedImpression;
     private boolean baseNativeAdIsClicked;
-    private DownloadResponse downloadResponse;
+    @Mock
+    private MoPubRequestQueue mockRequestQueue;
+    private SpinningProgressView mockSpinningProgressView;
+
 
     @Before
     public void setUp() throws Exception {
-        context = new Activity();
+        setupWithClickUrl("clickDestinationUrl");
+    }
+
+    private void setupWithClickUrl(String clickUrl) {
+        context = Robolectric.buildActivity(Activity.class).create().get();
         mNativeAd = new BaseForwardingNativeAd() {
             @Override
             public void recordImpression() {
@@ -56,7 +66,7 @@ public class NativeResponseTest {
             }
 
             @Override
-            public void handleClick(final View view) {
+            public void handleClick(@NonNull final View view) {
                 baseNativeAdIsClicked = true;
             }
         };
@@ -64,7 +74,7 @@ public class NativeResponseTest {
         mNativeAd.setText("text");
         mNativeAd.setMainImageUrl("mainImageUrl");
         mNativeAd.setIconImageUrl("iconImageUrl");
-        mNativeAd.setClickDestinationUrl("clickDestinationUrl");
+        mNativeAd.setClickDestinationUrl(clickUrl);
         mNativeAd.setCallToAction("callToAction");
         mNativeAd.addExtra("extra", "extraValue");
         mNativeAd.addExtra("extraImage", "extraImageUrl");
@@ -73,23 +83,29 @@ public class NativeResponseTest {
 
         view = new LinearLayout(context);
 
-        final TestHttpResponseWithHeaders testHttpResponseWithHeaders = new TestHttpResponseWithHeaders(200, "");
-        testHttpResponseWithHeaders.addHeader(ResponseHeader.IMPRESSION_URL.getKey(), "moPubImpressionTrackerUrl");
-        testHttpResponseWithHeaders.addHeader(ResponseHeader.CLICKTHROUGH_URL.getKey(), "moPubClickTrackerUrl");
-        downloadResponse = new DownloadResponse(testHttpResponseWithHeaders);
+        Networking.setRequestQueueForTesting(mockRequestQueue);
 
         moPubNativeListener = mock(MoPubNative.MoPubNativeListener.class);
 
-        subject = new NativeResponse(context, downloadResponse, "adunit_id", mNativeAd, moPubNativeListener);
+        subject = new NativeResponse(context,
+                "moPubImpressionTrackerUrl",
+                "moPubClickTrackerUrl",
+                "adunit_id", mNativeAd, moPubNativeListener);
 
         mMockNativeAd = mock(NativeAdInterface.class);
-        subjectWMockBaseNativeAd = new NativeResponse(context, downloadResponse, "adunit_id", mMockNativeAd, moPubNativeListener);
+        subjectWMockBaseNativeAd = new NativeResponse(context,
+                "moPubImpressionTrackerUrl",
+                "moPubClickTrackerUrl",
+                "adunit_id", mMockNativeAd, moPubNativeListener);
+
+        mockSpinningProgressView = mock(SpinningProgressView.class);
     }
 
     @Test
     public void constructor_shouldSetNativeEventListenerOnNativeAdInterface() {
         reset(mMockNativeAd);
-        subject = new NativeResponse(context, downloadResponse, "adunit_id", mMockNativeAd, moPubNativeListener);
+        subject = new NativeResponse(context, "moPubImpressionTrackerUrl", "moPubClickTrackerUrl",
+                "adunit_id", mMockNativeAd, moPubNativeListener);
         verify(mMockNativeAd).setNativeEventListener(any(BaseForwardingNativeAd.NativeEventListener.class));
     }
 
@@ -205,33 +221,28 @@ public class NativeResponseTest {
 
     @Test
     public void recordImpression_shouldRecordImpressionsAndCallIntoBaseNativeAdAndNotifyListenerIdempotently() {
-        Robolectric.getFakeHttpLayer().addPendingHttpResponse(200, "ok");
-        Robolectric.getFakeHttpLayer().addPendingHttpResponse(200, "ok");
         assertThat(subject.getRecordedImpression()).isFalse();
 
         subject.recordImpression(view);
 
         assertThat(subject.getRecordedImpression()).isTrue();
 
-        List<HttpRequestInfo> httpRequestInfos = Robolectric.getFakeHttpLayer().getSentHttpRequestInfos();
-        assertThat(httpRequestInfos.size()).isEqualTo(2);
-        assertThat(httpRequestInfos.get(0).getHttpRequest().getRequestLine().getUri()).isEqualTo("moPubImpressionTrackerUrl");
-        assertThat(httpRequestInfos.get(1).getHttpRequest().getRequestLine().getUri()).isEqualTo("impressionUrl");
-
         assertThat(baseNativeAdRecordedImpression).isTrue();
         verify(moPubNativeListener).onNativeImpression(view);
+        // There are two impression trackers here.
+        verify(mockRequestQueue, times(2)).add(any(Request.class));
 
         // reset state
         baseNativeAdRecordedImpression = false;
-        Robolectric.getFakeHttpLayer().clearRequestInfos();
         reset(moPubNativeListener);
+        reset(mockRequestQueue);
 
         // verify impression tracking doesn't fire again
         subject.recordImpression(view);
         assertThat(subject.getRecordedImpression()).isTrue();
-        assertThat(Robolectric.getFakeHttpLayer().getSentHttpRequestInfos()).isEmpty();
         assertThat(baseNativeAdRecordedImpression).isFalse();
         verify(moPubNativeListener, never()).onNativeImpression(view);
+        verify(mockRequestQueue, never()).add(any(Request.class));
     }
 
     @Test
@@ -239,38 +250,34 @@ public class NativeResponseTest {
         subject.destroy();
         subject.recordImpression(view);
         assertThat(subject.getRecordedImpression()).isFalse();
-        assertThat(Robolectric.getFakeHttpLayer().getSentHttpRequestInfos()).isEmpty();
         assertThat(baseNativeAdRecordedImpression).isFalse();
         verify(moPubNativeListener, never()).onNativeImpression(view);
+        verify(mockRequestQueue, never()).add(any(Request.class));
     }
 
     @Test
     public void handleClick_withNoBaseNativeAdClickDestinationUrl_shouldRecordClickAndCallIntoBaseNativeAdAndNotifyListener() {
-        Robolectric.getFakeHttpLayer().addPendingHttpResponse(200, "ok");
         assertThat(subject.isClicked()).isFalse();
 
         subject.handleClick(view);
 
         assertThat(subject.isClicked()).isTrue();
 
-        List<HttpRequestInfo> httpRequestInfos = Robolectric.getFakeHttpLayer().getSentHttpRequestInfos();
-        assertThat(httpRequestInfos.size()).isEqualTo(1);
-        assertThat(httpRequestInfos.get(0).getHttpRequest().getRequestLine().getUri()).isEqualTo("moPubClickTrackerUrl");
-
         assertThat(baseNativeAdIsClicked).isTrue();
         verify(moPubNativeListener).onNativeClick(view);
+        verify(mockRequestQueue).add(any(Request.class));
 
         // reset state
         baseNativeAdIsClicked = false;
-        Robolectric.getFakeHttpLayer().clearRequestInfos();
         reset(moPubNativeListener);
+        reset(mockRequestQueue);
 
         // second time, tracking does not fire
         subject.handleClick(view);
         assertThat(subject.isClicked()).isTrue();
-        assertThat(Robolectric.getFakeHttpLayer().getSentHttpRequestInfos()).isEmpty();
         assertThat(baseNativeAdRecordedImpression).isFalse();
         verify(moPubNativeListener).onNativeClick(view);
+        verifyZeroInteractions(mockRequestQueue);
     }
 
     @Ignore("pending")
@@ -280,13 +287,52 @@ public class NativeResponseTest {
     }
 
     @Test
+    public void handleClick_shouldShowSpinner_shouldRemoveSpinner_WhenSucceeded() {
+        setupWithClickUrl("http://www.mopub.com");
+
+        Robolectric.getBackgroundScheduler().pause();
+
+        subject.handleClick(view, mockSpinningProgressView);
+
+        verify(mockSpinningProgressView).addToRoot(view);
+        Robolectric.getBackgroundScheduler().unPause();
+        verify(mockSpinningProgressView).removeFromRoot();
+    }
+
+    @Test
+    public void handleClick_shouldShowSpinner_shouldRemoveSpinner_WhenFailed() {
+        setupWithClickUrl("");
+
+        Robolectric.getBackgroundScheduler().pause();
+
+        subject.handleClick(view, mockSpinningProgressView);
+
+        verify(mockSpinningProgressView).addToRoot(view);
+        Robolectric.getBackgroundScheduler().unPause();
+        verify(mockSpinningProgressView).removeFromRoot();
+    }
+
+    @Test
+    public void handleClick_withNullView_shouldNotShowSpinner() {
+        setupWithClickUrl("http://www.mopub.com");
+
+        Robolectric.getBackgroundScheduler().pause();
+
+        subject.handleClick(null, mockSpinningProgressView);
+
+        verify(mockSpinningProgressView, never()).addToRoot(view);
+        Robolectric.getBackgroundScheduler().unPause();
+        verify(mockSpinningProgressView, never()).removeFromRoot();
+    }
+
+    @Test
     public void handleClick_whenDestroyed_shouldReturnFast() {
         subject.destroy();
         subject.handleClick(view);
         assertThat(subject.isClicked()).isFalse();
-        assertThat(Robolectric.getFakeHttpLayer().getSentHttpRequestInfos()).isEmpty();
         assertThat(baseNativeAdIsClicked).isFalse();
         verify(moPubNativeListener, never()).onNativeClick(view);
+        verifyZeroInteractions(mockRequestQueue);
     }
 
     @Test

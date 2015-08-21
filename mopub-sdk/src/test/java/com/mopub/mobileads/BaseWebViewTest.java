@@ -2,7 +2,6 @@ package com.mopub.mobileads;
 
 
 import android.app.Activity;
-import android.os.Build;
 import android.os.Build.VERSION_CODES;
 import android.view.ViewGroup;
 import android.webkit.WebSettings;
@@ -16,8 +15,6 @@ import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowWebView;
 
-import static com.mopub.common.util.VersionCode.JELLY_BEAN_MR1;
-import static com.mopub.common.util.VersionCode.JELLY_BEAN_MR2;
 import static org.fest.assertions.api.Assertions.assertThat;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
@@ -31,7 +28,7 @@ public class BaseWebViewTest {
 
     @Before
     public void setup() {
-        context = new Activity();
+        context = Robolectric.buildActivity(Activity.class).create().get();
     }
 
     @Config(reportSdk = VERSION_CODES.JELLY_BEAN_MR1)

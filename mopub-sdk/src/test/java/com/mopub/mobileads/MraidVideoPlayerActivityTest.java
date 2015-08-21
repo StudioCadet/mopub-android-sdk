@@ -10,7 +10,7 @@ import android.widget.ImageView;
 
 import com.mopub.common.MoPubBrowser;
 import com.mopub.common.test.support.SdkTestRunner;
-import com.mopub.mobileads.util.vast.VastVideoConfiguration;
+import com.mopub.mraid.MraidVideoViewController;
 
 import org.junit.Before;
 import org.junit.Ignore;
@@ -19,12 +19,11 @@ import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.shadows.ShadowActivity;
 
+import static com.mopub.common.DataKeys.BROADCAST_IDENTIFIER_KEY;
 import static org.fest.assertions.api.Assertions.assertThat;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.withSettings;
 import static org.robolectric.Robolectric.shadowOf;
 
 @RunWith(SdkTestRunner.class)
@@ -40,14 +39,11 @@ public class MraidVideoPlayerActivityTest {
 
     @Before
     public void setup() {
-        context = new Activity();
+        context = Robolectric.buildActivity(Activity.class).create().get();
         intent = new Intent(context, MraidVideoPlayerActivity.class);
 
         testBroadcastIdentifier = 1001;
-        AdConfiguration adConfiguration = mock(AdConfiguration.class, withSettings().serializable());
-        when(adConfiguration.getBroadcastIdentifier()).thenReturn(testBroadcastIdentifier);
-        intent.putExtra(AdFetcher.AD_CONFIGURATION_KEY, adConfiguration);
-
+        intent.putExtra(BROADCAST_IDENTIFIER_KEY, testBroadcastIdentifier);
         baseVideoViewController = mock(BaseVideoViewController.class);
     }
 
@@ -180,9 +176,9 @@ public class MraidVideoPlayerActivityTest {
 
     private void initializeSubjectForVast() {
         intent.putExtra(BaseVideoPlayerActivity.VIDEO_CLASS_EXTRAS_KEY, "vast");
-        VastVideoConfiguration vastVideoConfiguration = new VastVideoConfiguration();
-        vastVideoConfiguration.setDiskMediaFileUrl("video_path");
-        intent.putExtra(VastVideoViewController.VAST_VIDEO_CONFIGURATION, vastVideoConfiguration);
+        VastVideoConfig vastVideoConfig = new VastVideoConfig();
+        vastVideoConfig.setDiskMediaFileUrl("video_path");
+        intent.putExtra(VastVideoViewController.VAST_VIDEO_CONFIG, vastVideoConfig);
 
         subject = Robolectric.buildActivity(MraidVideoPlayerActivity.class)
                 .withIntent(intent)

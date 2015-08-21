@@ -9,13 +9,21 @@ import android.view.View;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import com.mopub.common.AdReport;
+import com.mopub.common.CreativeOrientation;
+import com.mopub.common.DataKeys;
+import com.mopub.common.util.DeviceUtils;
 import com.mopub.mobileads.factories.HtmlInterstitialWebViewFactory;
 
-import static com.mopub.mobileads.AdFetcher.AD_CONFIGURATION_KEY;
-import static com.mopub.mobileads.AdFetcher.CLICKTHROUGH_URL_KEY;
-import static com.mopub.mobileads.AdFetcher.HTML_RESPONSE_BODY_KEY;
-import static com.mopub.mobileads.AdFetcher.REDIRECT_URL_KEY;
-import static com.mopub.mobileads.AdFetcher.SCROLLABLE_KEY;
+import java.io.Serializable;
+
+import static com.mopub.common.DataKeys.AD_REPORT_KEY;
+import static com.mopub.common.DataKeys.BROADCAST_IDENTIFIER_KEY;
+import static com.mopub.common.DataKeys.CLICKTHROUGH_URL_KEY;
+import static com.mopub.common.DataKeys.CREATIVE_ORIENTATION_KEY;
+import static com.mopub.common.DataKeys.HTML_RESPONSE_BODY_KEY;
+import static com.mopub.common.DataKeys.REDIRECT_URL_KEY;
+import static com.mopub.common.DataKeys.SCROLLABLE_KEY;
 import static com.mopub.mobileads.BaseInterstitialActivity.JavaScriptWebViewCallbacks.WEB_VIEW_DID_APPEAR;
 import static com.mopub.mobileads.BaseInterstitialActivity.JavaScriptWebViewCallbacks.WEB_VIEW_DID_CLOSE;
 import static com.mopub.mobileads.CustomEventInterstitial.CustomEventInterstitialListener;
@@ -30,8 +38,11 @@ import static com.mopub.mobileads.HtmlWebViewClient.MOPUB_FINISH_LOAD;
 public class MoPubActivity extends BaseInterstitialActivity {
     private HtmlInterstitialWebView mHtmlInterstitialWebView;
 
-    public static void start(Context context, String htmlData, boolean isScrollable, String redirectUrl, String clickthroughUrl, AdConfiguration adConfiguration) {
-        Intent intent = createIntent(context, htmlData, isScrollable, redirectUrl, clickthroughUrl, adConfiguration);
+    public static void start(Context context, String htmlData, AdReport adReport,
+            boolean isScrollable, String redirectUrl, String clickthroughUrl,
+            CreativeOrientation creativeOrientation, long broadcastIdentifier) {
+        Intent intent = createIntent(context, htmlData, adReport, isScrollable,
+                redirectUrl, clickthroughUrl, creativeOrientation, broadcastIdentifier);
         try {
             context.startActivity(intent);
         } catch (ActivityNotFoundException anfe) {
@@ -39,27 +50,26 @@ public class MoPubActivity extends BaseInterstitialActivity {
         }
     }
 
-    static Intent createIntent(Context context, String htmlData, boolean isScrollable, String redirectUrl, String clickthroughUrl, AdConfiguration adConfiguration) {
+    static Intent createIntent(Context context,
+            String htmlData, AdReport adReport, boolean isScrollable, String redirectUrl,
+            String clickthroughUrl, CreativeOrientation orientation, long broadcastIdentifier) {
         Intent intent = new Intent(context, MoPubActivity.class);
         intent.putExtra(HTML_RESPONSE_BODY_KEY, htmlData);
         intent.putExtra(SCROLLABLE_KEY, isScrollable);
         intent.putExtra(CLICKTHROUGH_URL_KEY, clickthroughUrl);
         intent.putExtra(REDIRECT_URL_KEY, redirectUrl);
-        intent.putExtra(AD_CONFIGURATION_KEY, adConfiguration);
+        intent.putExtra(BROADCAST_IDENTIFIER_KEY, broadcastIdentifier);
+        intent.putExtra(AD_REPORT_KEY, adReport);
+        intent.putExtra(CREATIVE_ORIENTATION_KEY, orientation);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         return intent;
     }
 
-    static void preRenderHtml(final Context context, final CustomEventInterstitialListener customEventInterstitialListener, String htmlData) {
-        HtmlInterstitialWebView dummyWebView = HtmlInterstitialWebViewFactory.create(context, customEventInterstitialListener, false, null, null, null);
+    static void preRenderHtml(final Context context, final AdReport adReport,
+            final CustomEventInterstitialListener customEventInterstitialListener,
+            String htmlData) {
+        HtmlInterstitialWebView dummyWebView = HtmlInterstitialWebViewFactory.create(context, adReport, customEventInterstitialListener, false, null, null);
         dummyWebView.enablePlugins(false);
-
-        dummyWebView.addMoPubUriJavascriptInterface(new HtmlInterstitialWebView.MoPubUriJavascriptFireFinishLoadListener() {
-            @Override
-            public void onInterstitialLoaded() {
-                customEventInterstitialListener.onInterstitialLoaded();
-            }
-        });
         dummyWebView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
@@ -83,7 +93,7 @@ public class MoPubActivity extends BaseInterstitialActivity {
         String clickthroughUrl = intent.getStringExtra(CLICKTHROUGH_URL_KEY);
         String htmlResponse = intent.getStringExtra(HTML_RESPONSE_BODY_KEY);
 
-        mHtmlInterstitialWebView = HtmlInterstitialWebViewFactory.create(getApplicationContext(), new BroadcastingInterstitialListener(), isScrollable, redirectUrl, clickthroughUrl, getAdConfiguration());
+        mHtmlInterstitialWebView = HtmlInterstitialWebViewFactory.create(getApplicationContext(), mAdReport, new BroadcastingInterstitialListener(), isScrollable, redirectUrl, clickthroughUrl);
         mHtmlInterstitialWebView.loadHtmlResponse(htmlResponse);
 
         return mHtmlInterstitialWebView;
@@ -93,6 +103,15 @@ public class MoPubActivity extends BaseInterstitialActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // Lock the device orientation
+        Serializable orientationExtra = getIntent().getSerializableExtra(DataKeys.CREATIVE_ORIENTATION_KEY);
+        CreativeOrientation requestedOrientation;
+        if (orientationExtra == null || !(orientationExtra instanceof CreativeOrientation)) {
+            requestedOrientation = CreativeOrientation.UNDEFINED;
+        } else {
+            requestedOrientation = (CreativeOrientation) orientationExtra;
+        }
+        DeviceUtils.lockOrientation(this, requestedOrientation);
         broadcastAction(this, getBroadcastIdentifier(), ACTION_INTERSTITIAL_SHOW);
     }
 

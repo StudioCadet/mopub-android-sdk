@@ -2,23 +2,30 @@ package com.mopub.mobileads;
 
 import android.content.Context;
 import android.os.Handler;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.view.View;
 
+import com.mopub.common.AdReport;
+import com.mopub.common.Constants;
+import com.mopub.common.Preconditions;
 import com.mopub.common.logging.MoPubLog;
-import com.mopub.common.util.Json;
 import com.mopub.mobileads.CustomEventBanner.CustomEventBannerListener;
 import com.mopub.mobileads.factories.CustomEventBannerFactory;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.TreeMap;
 
-import static com.mopub.mobileads.AdFetcher.AD_CONFIGURATION_KEY;
+import static com.mopub.common.DataKeys.AD_HEIGHT;
+import static com.mopub.common.DataKeys.AD_REPORT_KEY;
+import static com.mopub.common.DataKeys.AD_WIDTH;
+import static com.mopub.common.DataKeys.BROADCAST_IDENTIFIER_KEY;
 import static com.mopub.mobileads.MoPubErrorCode.ADAPTER_NOT_FOUND;
 import static com.mopub.mobileads.MoPubErrorCode.NETWORK_TIMEOUT;
 import static com.mopub.mobileads.MoPubErrorCode.UNSPECIFIED;
 
 public class CustomEventBannerAdapter implements CustomEventBannerListener {
-    public static final int DEFAULT_BANNER_TIMEOUT_DELAY = 10000;
+    public static final int DEFAULT_BANNER_TIMEOUT_DELAY = Constants.TEN_SECONDS_MILLIS;
     private boolean mInvalidated;
     private MoPubView mMoPubView;
     private Context mContext;
@@ -30,12 +37,15 @@ public class CustomEventBannerAdapter implements CustomEventBannerListener {
     private final Runnable mTimeout;
     private boolean mStoredAutorefresh;
 
-    public CustomEventBannerAdapter(MoPubView moPubView, String className, String classData) {
+    public CustomEventBannerAdapter(@NonNull MoPubView moPubView,
+            @NonNull String className,
+            @NonNull Map<String, String> serverExtras,
+            long broadcastIdentifier,
+            @Nullable AdReport adReport) {
+        Preconditions.checkNotNull(serverExtras);
         mHandler = new Handler();
         mMoPubView = moPubView;
         mContext = moPubView.getContext();
-        mLocalExtras = new HashMap<String, Object>();
-        mServerExtras = new HashMap<String, String>();
         mTimeout = new Runnable() {
             @Override
             public void run() {
@@ -55,19 +65,16 @@ public class CustomEventBannerAdapter implements CustomEventBannerListener {
         }
 
         // Attempt to load the JSON extras into mServerExtras.
-        try {
-            mServerExtras = Json.jsonStringToMap(classData);
-        } catch (Exception exception) {
-            MoPubLog.d("Failed to create Map from JSON: " + classData + exception.toString());
-        }
+        mServerExtras = new TreeMap<String, String>(serverExtras);
 
         mLocalExtras = mMoPubView.getLocalExtras();
         if (mMoPubView.getLocation() != null) {
             mLocalExtras.put("location", mMoPubView.getLocation());
         }
-        if (mMoPubView.getAdViewController() != null) {
-            mLocalExtras.put(AD_CONFIGURATION_KEY, mMoPubView.getAdViewController().getAdConfiguration());
-        }
+        mLocalExtras.put(BROADCAST_IDENTIFIER_KEY, broadcastIdentifier);
+        mLocalExtras.put(AD_REPORT_KEY, adReport);
+        mLocalExtras.put(AD_WIDTH, mMoPubView.getAdWidth());
+        mLocalExtras.put(AD_HEIGHT, mMoPubView.getAdHeight());
     }
 
     void loadAd() {
@@ -79,11 +86,26 @@ public class CustomEventBannerAdapter implements CustomEventBannerListener {
             mHandler.postDelayed(mTimeout, getTimeoutDelayMilliseconds());
         }
 
-        mCustomEventBanner.loadBanner(mContext, this, mLocalExtras, mServerExtras);
+        // Custom event classes can be developed by any third party and may not be tested.
+        // We catch all exceptions here to prevent crashes from untested code.
+        try {
+            mCustomEventBanner.loadBanner(mContext, this, mLocalExtras, mServerExtras);
+        } catch (Exception e) {
+            MoPubLog.d("Loading a custom event banner threw an exception.", e);
+            onBannerFailed(MoPubErrorCode.INTERNAL_ERROR);
+        }
     }
 
     void invalidate() {
-        if (mCustomEventBanner != null) mCustomEventBanner.onInvalidate();
+        if (mCustomEventBanner != null) {
+            // Custom event classes can be developed by any third party and may not be tested.
+            // We catch all exceptions here to prevent crashes from untested code.
+            try {
+                mCustomEventBanner.onInvalidate();
+            } catch (Exception e) {
+                MoPubLog.d("Invalidating a custom event banner threw an exception", e);
+            }
+        }
         mContext = null;
         mCustomEventBanner = null;
         mLocalExtras = null;
@@ -131,8 +153,10 @@ public class CustomEventBannerAdapter implements CustomEventBannerListener {
 
     @Override
     public void onBannerFailed(MoPubErrorCode errorCode) {
-        if (isInvalidated()) return;
-        
+        if (isInvalidated()) {
+            return;
+        }
+
         if (mMoPubView != null) {
             if (errorCode == null) {
                 errorCode = UNSPECIFIED;
@@ -144,7 +168,9 @@ public class CustomEventBannerAdapter implements CustomEventBannerListener {
 
     @Override
     public void onBannerExpanded() {
-        if (isInvalidated()) return;
+        if (isInvalidated()) {
+            return;
+        }
 
         mStoredAutorefresh = mMoPubView.getAutorefreshEnabled();
         mMoPubView.setAutorefreshEnabled(false);
@@ -153,7 +179,9 @@ public class CustomEventBannerAdapter implements CustomEventBannerListener {
 
     @Override
     public void onBannerCollapsed() {
-        if (isInvalidated()) return;
+        if (isInvalidated()) {
+            return;
+        }
 
         mMoPubView.setAutorefreshEnabled(mStoredAutorefresh);
         mMoPubView.adClosed();
@@ -161,11 +189,15 @@ public class CustomEventBannerAdapter implements CustomEventBannerListener {
 
     @Override
     public void onBannerClicked() {
-        if (isInvalidated()) return;
-        
-        if (mMoPubView != null) mMoPubView.registerClick();
+        if (isInvalidated()) {
+            return;
+        }
+
+        if (mMoPubView != null) {
+            mMoPubView.registerClick();
+        }
     }
-    
+
     @Override
     public void onLeaveApplication() {
         onBannerClicked();

@@ -3,7 +3,10 @@ package com.mopub.mobileads;
 import android.app.Activity;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.content.res.Resources;
+import android.graphics.Point;
 import android.location.Location;
+import android.location.LocationManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
@@ -11,26 +14,33 @@ import android.os.Build;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
+import android.util.DisplayMetrics;
+import android.view.Display;
+import android.view.WindowManager;
 
-import com.mopub.common.AdUrlGenerator;
 import com.mopub.common.ClientMetadata;
 import com.mopub.common.GpsHelper;
 import com.mopub.common.GpsHelperTest;
 import com.mopub.common.MoPub;
-import com.mopub.common.SharedPreferencesHelper;
 import com.mopub.common.test.support.SdkTestRunner;
 import com.mopub.common.util.Reflection.MethodBuilder;
 import com.mopub.common.util.Utils;
 import com.mopub.common.util.test.support.TestMethodBuilderFactory;
 import com.mopub.mobileads.test.support.MoPubShadowTelephonyManager;
+import com.mopub.mraid.MraidNativeCommandHandler;
+import com.mopub.network.Networking;
+import com.mopub.network.PlayServicesUrlRewriter;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Mockito;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
+import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowConnectivityManager;
+import org.robolectric.shadows.ShadowLocationManager;
 import org.robolectric.shadows.ShadowNetworkInfo;
 
 import static android.Manifest.permission.ACCESS_NETWORK_STATE;
@@ -43,13 +53,13 @@ import static android.net.ConnectivityManager.TYPE_MOBILE_MMS;
 import static android.net.ConnectivityManager.TYPE_MOBILE_SUPL;
 import static android.net.ConnectivityManager.TYPE_WIFI;
 import static android.telephony.TelephonyManager.NETWORK_TYPE_UNKNOWN;
-import static com.mopub.common.AdUrlGenerator.TwitterAppInstalledStatus;
 import static com.mopub.common.ClientMetadata.MoPubNetworkType;
-import static com.mopub.common.util.Strings.isEmpty;
 import static org.fest.assertions.api.Assertions.assertThat;
 import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 import static org.robolectric.Robolectric.application;
 import static org.robolectric.Robolectric.shadowOf;
@@ -58,8 +68,12 @@ import static org.robolectric.Robolectric.shadowOf;
 @Config(shadows = {MoPubShadowTelephonyManager.class})
 public class WebViewAdUrlGeneratorTest {
 
-    private WebViewAdUrlGenerator subject;
     private static final String TEST_UDID = "20b013c721c";
+    private static final int TEST_SCREEN_WIDTH = 42;
+    private static final int TEST_SCREEN_HEIGHT = 1337;
+    private static final float TEST_DENSITY = 1.0f;
+
+    private WebViewAdUrlGenerator subject;
     private String expectedUdid;
     private Configuration configuration;
     private MoPubShadowTelephonyManager shadowTelephonyManager;
@@ -69,20 +83,52 @@ public class WebViewAdUrlGeneratorTest {
 
     @Before
     public void setup() {
-        context = new Activity();
+        context = spy(Robolectric.buildActivity(Activity.class).create().get());
         shadowOf(context).grantPermissions(ACCESS_NETWORK_STATE);
-        subject = new WebViewAdUrlGenerator(context);
+
+        // Set the expected screen dimensions to arbitrary numbers
+        final Resources spyResources = spy(context.getResources());
+        final DisplayMetrics mockDisplayMetrics = mock(DisplayMetrics.class);
+        mockDisplayMetrics.widthPixels = TEST_SCREEN_WIDTH;
+        mockDisplayMetrics.heightPixels = TEST_SCREEN_HEIGHT;
+        mockDisplayMetrics.density = TEST_DENSITY;
+        when(spyResources.getDisplayMetrics()).thenReturn(mockDisplayMetrics);
+        when(context.getResources()).thenReturn(spyResources);
+        when(context.getPackageName()).thenReturn("testBundle");
+
+        // Only do this on Android 17+ because getRealSize doesn't exist before then.
+        // This is the default pathway.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+            final WindowManager mockWindowManager = mock(WindowManager.class);
+            final Display mockDisplay = mock(Display.class);
+            doAnswer(new Answer() {
+                @Override
+                public Object answer(final InvocationOnMock invocationOnMock) throws Throwable {
+                    final Point point = (Point) invocationOnMock.getArguments()[0];
+                    point.x = TEST_SCREEN_WIDTH;
+                    point.y = TEST_SCREEN_HEIGHT;
+                    return null;
+                }
+            }).when(mockDisplay).getRealSize(any(Point.class));
+            when(mockWindowManager.getDefaultDisplay()).thenReturn(mockDisplay);
+            final Context spyApplicationContext = spy(context.getApplicationContext());
+            when(spyApplicationContext.getSystemService(Context.WINDOW_SERVICE)).thenReturn(mockWindowManager);
+            when(context.getApplicationContext()).thenReturn(spyApplicationContext);
+        }
+
+        subject = new WebViewAdUrlGenerator(context,
+                new MraidNativeCommandHandler().isStorePictureSupported(context));
         Settings.Secure.putString(application.getContentResolver(), Settings.Secure.ANDROID_ID, TEST_UDID);
         expectedUdid = "sha%3A" + Utils.sha1(TEST_UDID);
         configuration = application.getResources().getConfiguration();
         shadowTelephonyManager = (MoPubShadowTelephonyManager) shadowOf((TelephonyManager) application.getSystemService(Context.TELEPHONY_SERVICE));
         shadowConnectivityManager = shadowOf((ConnectivityManager) application.getSystemService(Context.CONNECTIVITY_SERVICE));
         methodBuilder = TestMethodBuilderFactory.getSingletonMock();
+        Networking.useHttps(false);
     }
 
     @After
     public void tearDown() throws Exception {
-        AdUrlGenerator.setTwitterAppInstalledStatus(TwitterAppInstalledStatus.UNKNOWN);
         reset(methodBuilder);
     }
 
@@ -93,6 +139,13 @@ public class WebViewAdUrlGeneratorTest {
         String adUrl = generateMinimumUrlString();
 
         assertThat(adUrl).isEqualTo(expectedAdUrl);
+    }
+
+    @Test
+    public void generateAdUrl_withHttpsScheme() throws Exception {
+        Networking.useHttps(true);
+        String adUrl = generateMinimumUrlString();
+        assertThat(adUrl).startsWith("https://");
     }
 
     @Test
@@ -110,7 +163,7 @@ public class WebViewAdUrlGeneratorTest {
         final String expectedAdUrl = new AdUrlBuilder(expectedUdid)
                 .withAdUnitId("adUnitId")
                 .withQuery("key%3Avalue")
-                .withLatLon("20.1%2C30.0", "1")
+                .withLatLon("20.1%2C30.0", "1", "101325")
                 .withMcc("123")
                 .withMnc("456")
                 .withCountryIso("expected%20country")
@@ -126,12 +179,16 @@ public class WebViewAdUrlGeneratorTest {
         location.setLatitude(20.1);
         location.setLongitude(30.0);
         location.setAccuracy(1.23f); // should get rounded to "1"
+        location.setTime(System.currentTimeMillis() - 101325);
 
         String adUrl = subject
                 .withAdUnitId("adUnitId")
                 .withKeywords("key:value")
                 .withLocation(location)
                 .generateUrlString("ads.mopub.com");
+
+        // Only compare the seconds since millis can be off
+        adUrl = adUrl.replaceFirst("llf=101[0-9]{3}", "llf=101325");
 
         assertThat(adUrl).isEqualTo(expectedAdUrl);
     }
@@ -284,45 +341,6 @@ public class WebViewAdUrlGeneratorTest {
     }
 
     @Test
-    public void generateAdUrl_whenTwitterIsNotInstalled_shouldProcessAndNotSetTwitterInstallStatusOnFirstRequest() throws Exception {
-        AdUrlBuilder urlBuilder = new AdUrlBuilder(expectedUdid);
-
-        WebViewAdUrlGenerator spySubject = Mockito.spy(subject);
-        AdUrlGenerator.setTwitterAppInstalledStatus(TwitterAppInstalledStatus.UNKNOWN);
-        doReturn(TwitterAppInstalledStatus.NOT_INSTALLED).when(spySubject).getTwitterAppInstallStatus();
-
-        String adUrl = spySubject.generateUrlString("ads.mopub.com");
-
-        assertThat(adUrl).isEqualTo(urlBuilder.withTwitterAppInstalledStatus(TwitterAppInstalledStatus.NOT_INSTALLED).build());
-    }
-
-    @Test
-    public void generateAdUrl_whenTwitterIsInstalled_shouldProcessAndSetTwitterInstallStatusOnFirstRequest() throws Exception {
-        AdUrlBuilder urlBuilder = new AdUrlBuilder(expectedUdid);
-
-        WebViewAdUrlGenerator spySubject = Mockito.spy(subject);
-        AdUrlGenerator.setTwitterAppInstalledStatus(TwitterAppInstalledStatus.UNKNOWN);
-        doReturn(TwitterAppInstalledStatus.INSTALLED).when(spySubject).getTwitterAppInstallStatus();
-
-        String adUrl = spySubject.generateUrlString("ads.mopub.com");
-
-        assertThat(adUrl).isEqualTo(urlBuilder.withTwitterAppInstalledStatus(TwitterAppInstalledStatus.INSTALLED).build());
-    }
-
-    @Test
-    public void generateAdUrl_shouldNotProcessTwitterInstallStatusIfStatusIsAlreadySet() throws Exception {
-        AdUrlBuilder urlBuilder = new AdUrlBuilder(expectedUdid);
-
-        WebViewAdUrlGenerator spySubject = Mockito.spy(subject);
-        AdUrlGenerator.setTwitterAppInstalledStatus(TwitterAppInstalledStatus.NOT_INSTALLED);
-        doReturn(TwitterAppInstalledStatus.INSTALLED).when(spySubject).getTwitterAppInstallStatus();
-
-        String adUrl = spySubject.generateUrlString("ads.mopub.com");
-
-        assertThat(adUrl).isEqualTo(urlBuilder.withTwitterAppInstalledStatus(TwitterAppInstalledStatus.NOT_INSTALLED).build());
-    }
-
-    @Test
     public void generateAdUrl_shouldTolerateNullActiveNetwork() throws Exception {
         AdUrlBuilder urlBuilder = new AdUrlBuilder(expectedUdid);
         shadowConnectivityManager.setActiveNetworkInfo(null);
@@ -332,6 +350,8 @@ public class WebViewAdUrlGeneratorTest {
         assertThat(adUrl).isEqualTo(urlBuilder.withNetworkType(MoPubNetworkType.UNKNOWN).build());
     }
 
+
+
     @Test
     public void generateAdUrl_whenGooglePlayServicesIsLinkedAndAdInfoIsCached_shouldUseAdInfoParams() throws Exception {
         GpsHelper.setClassNamesForTesting();
@@ -340,11 +360,8 @@ public class WebViewAdUrlGeneratorTest {
         when(methodBuilder.execute()).thenReturn(GpsHelper.GOOGLE_PLAY_SUCCESS_CODE);
 
         GpsHelperTest.TestAdInfo adInfo = new GpsHelperTest.TestAdInfo();
-        SharedPreferencesHelper.getSharedPreferences(context)
-                .edit()
-                .putString(GpsHelper.ADVERTISING_ID_KEY, adInfo.ADVERTISING_ID)
-                .putBoolean(GpsHelper.IS_LIMIT_AD_TRACKING_ENABLED_KEY, adInfo.LIMIT_AD_TRACKING_ENABLED)
-                .commit();
+        final ClientMetadata clientMetadata = ClientMetadata.getInstance(context);
+        clientMetadata.setAdvertisingInfo(adInfo.mAdId, adInfo.mLimitAdTrackingEnabled);
 
         expectedUdid = "ifa%3A" + adInfo.ADVERTISING_ID;
         String expectedAdUrl = new AdUrlBuilder(expectedUdid)
@@ -354,28 +371,137 @@ public class WebViewAdUrlGeneratorTest {
     }
 
     @Test
+    public void generateAdUrl_whenLocationServiceGpsProviderHasMostRecentLocation_shouldUseLocationServiceValue() {
+        Location locationFromDeveloper = new Location("");
+        locationFromDeveloper.setLatitude(42);
+        locationFromDeveloper.setLongitude(-42);
+        locationFromDeveloper.setAccuracy(3.5f);
+        locationFromDeveloper.setTime(1000);
+
+        // Mock out the LocationManager's last known location to be more recent than the
+        // developer-supplied location.
+        ShadowLocationManager shadowLocationManager = Robolectric.shadowOf(
+                (LocationManager) application.getSystemService(Context.LOCATION_SERVICE));
+        Location locationFromSdk = new Location("");
+        locationFromSdk.setLatitude(37);
+        locationFromSdk.setLongitude(-122);
+        locationFromSdk.setAccuracy(5.0f);
+        locationFromSdk.setTime(2000);
+        shadowLocationManager.setLastKnownLocation(LocationManager.GPS_PROVIDER, locationFromSdk);
+
+        String adUrl = subject.withLocation(locationFromDeveloper)
+                .generateUrlString("ads.mopub.com");
+        assertThat(getParameterFromRequestUrl(adUrl, "ll")).isEqualTo("37.0,-122.0");
+        assertThat(getParameterFromRequestUrl(adUrl, "lla")).isEqualTo("5");
+        assertThat(getParameterFromRequestUrl(adUrl, "llsdk")).isEqualTo("1");
+    }
+
+    @Test
+    public void generateAdUrl_whenDeveloperSuppliesMoreRecentLocationThanLocationService_shouldUseDeveloperSuppliedLocation() {
+        Location locationFromDeveloper = new Location("");
+        locationFromDeveloper.setLatitude(42);
+        locationFromDeveloper.setLongitude(-42);
+        locationFromDeveloper.setAccuracy(3.5f);
+        locationFromDeveloper.setTime(1000);
+
+        ShadowLocationManager shadowLocationManager = Robolectric.shadowOf(
+                (LocationManager) application.getSystemService(Context.LOCATION_SERVICE));
+
+        // Mock out the LocationManager's last known location to be older than the
+        // developer-supplied location.
+        Location olderLocation = new Location("");
+        olderLocation.setLatitude(40);
+        olderLocation.setLongitude(-105);
+        olderLocation.setAccuracy(8.0f);
+        olderLocation.setTime(500);
+        shadowLocationManager.setLastKnownLocation(LocationManager.GPS_PROVIDER, olderLocation);
+
+        String adUrl = subject.withLocation(locationFromDeveloper)
+                .generateUrlString("ads.mopub.com");
+        assertThat(getParameterFromRequestUrl(adUrl, "ll")).isEqualTo("42.0,-42.0");
+        assertThat(getParameterFromRequestUrl(adUrl, "lla")).isEqualTo("3");
+        assertThat(getParameterFromRequestUrl(adUrl, "llsdk")).isEmpty();
+    }
+
+    @Test
+    public void generateAdUrl_whenLocationServiceNetworkProviderHasMostRecentLocation_shouldUseLocationServiceValue() {
+        Location locationFromDeveloper = new Location("");
+        locationFromDeveloper.setLatitude(42);
+        locationFromDeveloper.setLongitude(-42);
+        locationFromDeveloper.setAccuracy(3.5f);
+        locationFromDeveloper.setTime(1000);
+
+        // Mock out the LocationManager's last known location to be more recent than the
+        // developer-supplied location.
+        ShadowLocationManager shadowLocationManager = Robolectric.shadowOf(
+                (LocationManager) application.getSystemService(Context.LOCATION_SERVICE));
+        Location locationFromSdk = new Location("");
+        locationFromSdk.setLatitude(38);
+        locationFromSdk.setLongitude(-123);
+        locationFromSdk.setAccuracy(5.0f);
+        locationFromSdk.setTime(2000);
+        shadowLocationManager.setLastKnownLocation(LocationManager.NETWORK_PROVIDER,
+                locationFromSdk);
+
+        String adUrl = subject.withLocation(locationFromDeveloper)
+                .generateUrlString("ads.mopub.com");
+        assertThat(getParameterFromRequestUrl(adUrl, "ll")).isEqualTo("38.0,-123.0");
+        assertThat(getParameterFromRequestUrl(adUrl, "lla")).isEqualTo("5");
+        assertThat(getParameterFromRequestUrl(adUrl, "llsdk")).isEqualTo("1");
+    }
+
+    @Test
+    public void generateAdUrl_withNullPackageName_withEmptyPackageName_shouldNotIncludeBundleKey() {
+        when(context.getPackageName()).thenReturn(null).thenReturn("");
+
+        final String adUrlNullPackageName = generateMinimumUrlString();
+        final String adUrlEmptyPackageName = generateMinimumUrlString();
+
+        assertThat(adUrlNullPackageName).doesNotContain("&bundle=");
+        assertThat(adUrlEmptyPackageName).doesNotContain("&bundle=");
+    }
+
+    @Test
     public void enableLocationTracking_shouldIncludeLocationInUrl() {
         MoPub.setLocationAwareness(MoPub.LocationAwareness.NORMAL);
         String adUrl = generateMinimumUrlString();
-        assertThat(getLocationFromRequestUrl(adUrl)).isNotNull();
+        assertThat(getParameterFromRequestUrl(adUrl, "ll")).isNotNull();
     }
 
     @Test
     public void disableLocationCollection_shouldNotIncludeLocationInUrl() {
         MoPub.setLocationAwareness(MoPub.LocationAwareness.DISABLED);
         String adUrl = generateMinimumUrlString();
-        assertThat(getLocationFromRequestUrl(adUrl)).isNullOrEmpty();
+        assertThat(getParameterFromRequestUrl(adUrl, "ll")).isNullOrEmpty();
     }
 
-    private String getLocationFromRequestUrl(String requestString) {
-        Uri requestUri = Uri.parse(requestString);
-        String location = requestUri.getQueryParameter("ll");
+    @Test
+    public void disableLocationCollection_whenLocationServiceHasMostRecentLocation_shouldNotIncludeLocationInUrl() {
+        MoPub.setLocationAwareness(MoPub.LocationAwareness.DISABLED);
 
-        if (TextUtils.isEmpty(location)) {
+        // Mock out the LocationManager's last known location.
+        ShadowLocationManager shadowLocationManager = Robolectric.shadowOf(
+                (LocationManager) application.getSystemService(Context.LOCATION_SERVICE));
+        Location locationFromSdk = new Location("");
+        locationFromSdk.setLatitude(37);
+        locationFromSdk.setLongitude(-122);
+        locationFromSdk.setAccuracy(5.0f);
+        locationFromSdk.setTime(2000);
+        shadowLocationManager.setLastKnownLocation(LocationManager.GPS_PROVIDER, locationFromSdk);
+
+        String adUrl = generateMinimumUrlString();
+        assertThat(getParameterFromRequestUrl(adUrl, "ll")).isNullOrEmpty();
+    }
+
+    private String getParameterFromRequestUrl(String requestString, String key) {
+        Uri requestUri = Uri.parse(requestString);
+        String parameter = requestUri.getQueryParameter(key);
+
+        if (TextUtils.isEmpty(parameter)) {
             return "";
         }
 
-        return location;
+        return parameter;
     }
 
     private NetworkInfo createNetworkInfo(int type) {
@@ -394,13 +520,13 @@ public class WebViewAdUrlGeneratorTest {
         private String query = "";
         private String latLon = "";
         private String locationAccuracy = "";
+        private String latLonLastUpdated = "";
         private String mnc = "";
         private String mcc = "";
         private String countryIso = "";
         private String carrierName = "";
         private String dnt = "";
         private MoPubNetworkType networkType = MoPubNetworkType.MOBILE;
-        private TwitterAppInstalledStatus twitterAppInstalledStatus = TwitterAppInstalledStatus.UNKNOWN;
         private int externalStoragePermission;
 
         public AdUrlBuilder(String expectedUdid) {
@@ -415,23 +541,25 @@ public class WebViewAdUrlGeneratorTest {
                     "&dn=" + Build.MANUFACTURER +
                     "%2C" + Build.MODEL +
                     "%2C" + Build.PRODUCT +
-                    "&udid=" + expectedUdid +
-                    paramIfNotEmpty("dnt", dnt) +
+                    "&bundle=" + "testBundle" +
                     paramIfNotEmpty("q", query) +
-                    (isEmpty(latLon) ? "" : "&ll=" + latLon + "&lla=" + locationAccuracy) +
+                    (TextUtils.isEmpty(latLon) ? "" :
+                            "&ll=" + latLon + "&lla=" + locationAccuracy + "&llf=" + latLonLastUpdated) +
                     "&z=-0700" +
                     "&o=u" +
+                    "&w=" + TEST_SCREEN_WIDTH +
+                    "&h=" + TEST_SCREEN_HEIGHT +
                     "&sc_a=1.0" +
-                    "&mr=1" +
                     paramIfNotEmpty("mcc", mcc) +
                     paramIfNotEmpty("mnc", mnc) +
                     paramIfNotEmpty("iso", countryIso) +
                     paramIfNotEmpty("cn", carrierName) +
                     "&ct=" + networkType +
-                    "&av=1.0" +
-                    "&android_perms_ext_storage=" + externalStoragePermission +
-                    ((twitterAppInstalledStatus == TwitterAppInstalledStatus.INSTALLED) ? "&ts=1" : "");
-
+                    "&av=" + BuildConfig.VERSION_NAME +
+                    "&udid=" + PlayServicesUrlRewriter.UDID_TEMPLATE +
+                    "&dnt=" + PlayServicesUrlRewriter.DO_NOT_TRACK_TEMPLATE +
+                    "&mr=1" +
+                    "&android_perms_ext_storage=" + externalStoragePermission;
         }
 
         public AdUrlBuilder withAdUnitId(String adUnitId) {
@@ -444,9 +572,11 @@ public class WebViewAdUrlGeneratorTest {
             return this;
         }
 
-        public AdUrlBuilder withLatLon(String latLon, String locationAccuracy) {
+        public AdUrlBuilder withLatLon(String latLon, String locationAccuracy,
+                String latLonLastUpdated) {
             this.latLon = latLon;
             this.locationAccuracy = locationAccuracy;
+            this.latLonLastUpdated = latLonLastUpdated;
             return this;
         }
 
@@ -480,11 +610,6 @@ public class WebViewAdUrlGeneratorTest {
             return this;
         }
 
-        public AdUrlBuilder withTwitterAppInstalledStatus(TwitterAppInstalledStatus status) {
-            this.twitterAppInstalledStatus = status;
-            return this;
-        }
-
         public AdUrlBuilder withDnt(boolean dnt) {
             if (dnt) {
                 this.dnt = "1";
@@ -493,7 +618,7 @@ public class WebViewAdUrlGeneratorTest {
         }
 
         private String paramIfNotEmpty(String key, String value) {
-            if (isEmpty(value)) {
+            if (TextUtils.isEmpty(value)) {
                 return "";
             } else {
                 return "&" + key + "=" + value;

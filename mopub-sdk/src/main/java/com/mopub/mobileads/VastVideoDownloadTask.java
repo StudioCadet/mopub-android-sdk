@@ -29,7 +29,7 @@ public class VastVideoDownloadTask extends AsyncTask<String, Void, Boolean> {
 
     @Override
     protected Boolean doInBackground(final String... params) {
-        if (params == null || params[0] == null) {
+        if (params == null || params.length == 0 || params[0] == null) {
             return false;
         }
 
@@ -37,7 +37,7 @@ public class VastVideoDownloadTask extends AsyncTask<String, Void, Boolean> {
         AndroidHttpClient httpClient = null;
         try {
             httpClient = HttpClient.getHttpClient();
-            final HttpGet httpget = new HttpGet(videoUrl);
+            final HttpGet httpget = HttpClient.initializeHttpGet(videoUrl);
             final HttpResponse response = httpClient.execute(httpget);
 
             if (response == null || response.getEntity() == null) {

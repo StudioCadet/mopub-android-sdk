@@ -17,6 +17,12 @@
 
     <repositories>
         <repository>
+            <id>jcenter</id>
+            <name>JCenter</name>
+            <url>http://jcenter.bintray.com</url>
+        </repository>
+
+        <repository>
             <id>andsupport</id>
             <name>Android Support</name>
             <url>file:///${env.ANDROID_HOME}/extras/android/m2repository</url>
@@ -32,7 +38,5 @@
     <modules>
         <module>mopub-sdk</module>
         <module>mopub-sample</module>
-        <module>robotium-sample</module>
-        <module>robotium-tests</module>
     </modules>
 </project>
